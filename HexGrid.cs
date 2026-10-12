@@ -7,12 +7,24 @@ namespace NavalSault;
 
 public class HexGrid
 {
-    private readonly HexTile _tileMesh;
-    private readonly List<Vector3> _tilePositions = new();
+    private const float HighlightFillAlpha = 110f / 255f;
+    private const float HighlightYOffset = 0.05f;
 
-    public HexGrid(GraphicsDevice graphicsDevice, float hexRadius, int gridRadius, float tileY, Color color)
+    private readonly HexTile _tileMesh;
+    private readonly HexTile _highlightTileMesh;
+    private readonly HexFill _highlightFillMesh;
+    private readonly Dictionary<(int Q, int R), Vector3> _tiles = new();
+
+    public float HexRadius { get; }
+    public float TileY { get; }
+
+    public HexGrid(GraphicsDevice graphicsDevice, float hexRadius, int gridRadius, float tileY, Color color, Color highlightColor)
     {
+        HexRadius = hexRadius;
+        TileY = tileY;
         _tileMesh = new HexTile(graphicsDevice, hexRadius, color);
+        _highlightTileMesh = new HexTile(graphicsDevice, hexRadius, highlightColor);
+        _highlightFillMesh = new HexFill(graphicsDevice, hexRadius, highlightColor * HighlightFillAlpha);
 
         for (int q = -gridRadius; q <= gridRadius; q++)
         {
@@ -22,20 +34,74 @@ public class HexGrid
             {
                 float x = hexRadius * 1.5f * q;
                 float z = hexRadius * (float)Math.Sqrt(3) * (r + q / 2f);
-                _tilePositions.Add(new Vector3(x, tileY, z));
+                _tiles[(q, r)] = new Vector3(x, tileY, z);
             }
         }
     }
 
-    public void Draw(GraphicsDevice graphicsDevice, BasicEffect effect)
+    public bool TryGetTilePosition(int q, int r, out Vector3 position)
+    {
+        return _tiles.TryGetValue((q, r), out position);
+    }
+
+    public (int Q, int R) WorldToAxial(Vector3 worldPosition)
+    {
+        float qf = (2f / 3f * worldPosition.X) / HexRadius;
+        float rf = (-1f / 3f * worldPosition.X + (float)Math.Sqrt(3) / 3f * worldPosition.Z) / HexRadius;
+        return AxialRound(qf, rf);
+    }
+
+    public bool TryPickTile(Vector3 worldPosition, out Vector3 tilePosition)
+    {
+        var (q, r) = WorldToAxial(worldPosition);
+        return TryGetTilePosition(q, r, out tilePosition);
+    }
+
+    private static (int Q, int R) AxialRound(float qf, float rf)
+    {
+        float x = qf;
+        float z = rf;
+        float y = -x - z;
+
+        int rx = (int)Math.Round(x, MidpointRounding.AwayFromZero);
+        int ry = (int)Math.Round(y, MidpointRounding.AwayFromZero);
+        int rz = (int)Math.Round(z, MidpointRounding.AwayFromZero);
+
+        float xDiff = Math.Abs(rx - x);
+        float yDiff = Math.Abs(ry - y);
+        float zDiff = Math.Abs(rz - z);
+
+        if (xDiff > yDiff && xDiff > zDiff)
+            rx = -ry - rz;
+        else if (yDiff > zDiff)
+            ry = -rx - rz;
+        else
+            rz = -rx - ry;
+
+        return (rx, rz);
+    }
+
+    public void Draw(GraphicsDevice graphicsDevice, BasicEffect effect, (int Q, int R)? highlightedTile = null)
     {
         effect.LightingEnabled = false;
         effect.VertexColorEnabled = true;
 
-        foreach (var position in _tilePositions)
+        foreach (var kvp in _tiles)
         {
-            effect.World = Matrix.CreateTranslation(position);
-            _tileMesh.Draw(graphicsDevice, effect);
+            effect.World = Matrix.CreateTranslation(kvp.Value);
+            var mesh = highlightedTile.HasValue && kvp.Key == highlightedTile.Value ? _highlightTileMesh : _tileMesh;
+            mesh.Draw(graphicsDevice, effect);
+        }
+
+        if (highlightedTile.HasValue && _tiles.TryGetValue(highlightedTile.Value, out var highlightPosition))
+        {
+            var previousBlendState = graphicsDevice.BlendState;
+            graphicsDevice.BlendState = BlendState.AlphaBlend;
+
+            effect.World = Matrix.CreateTranslation(highlightPosition + new Vector3(0f, HighlightYOffset, 0f));
+            _highlightFillMesh.Draw(graphicsDevice, effect);
+
+            graphicsDevice.BlendState = previousBlendState;
         }
 
         effect.LightingEnabled = true;
