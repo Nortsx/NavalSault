@@ -18,6 +18,9 @@ public class Camera
 
     public Matrix View { get; private set; }
     public Matrix Projection { get; private set; }
+    public Vector3 Position { get; private set; }
+    public Vector3 Forward { get; private set; }
+    public Vector3 Up => Vector3.Up;
 
     public Camera(GraphicsDevice graphicsDevice, Vector3 initialFocus)
     {
@@ -58,7 +61,8 @@ public class Camera
     {
         float pitchRad = MathHelper.ToRadians(PitchDegrees);
         Vector3 offset = new Vector3(0f, (float)Math.Sin(pitchRad), (float)Math.Cos(pitchRad)) * Distance;
-        Vector3 eye = _focusPoint + offset;
-        View = Matrix.CreateLookAt(eye, _focusPoint, Vector3.Up);
+        Position = _focusPoint + offset;
+        Forward = Vector3.Normalize(_focusPoint - Position);
+        View = Matrix.CreateLookAt(Position, _focusPoint, Up);
     }
 }

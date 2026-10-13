@@ -7,7 +7,18 @@ namespace NavalSault;
 
 public class Game1 : Game
 {
+    private const float WaterHeight = 0f;
+    private const float WaveSpeed = 0.03f;
+    private static readonly Color SkyColor = new(140, 185, 225);
+    private static readonly Color DeepWaterColor = new(8, 42, 66);
+    private static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.4f, -1f, 0.3f));
+
     private GraphicsDeviceManager _graphics;
+    private Effect _waterEffect;
+    private RenderTarget2D _reflectionTarget;
+    private RenderTarget2D _refractionTarget;
+    private Texture2D _distortionMap;
+    private Texture2D _normalMap;
     private BasicEffect _effect;
     private Camera _camera;
     private WaterPlane _waterPlane;
@@ -51,7 +62,7 @@ public class Game1 : Game
             VertexColorEnabled = false
         };
         _effect.DirectionalLight0.Enabled = true;
-        _effect.DirectionalLight0.Direction = Vector3.Normalize(new Vector3(0.4f, -1f, 0.3f));
+        _effect.DirectionalLight0.Direction = LightDirection;
         _effect.DirectionalLight0.DiffuseColor = new Vector3(1f, 1f, 0.95f);
         _effect.DirectionalLight0.SpecularColor = Vector3.Zero;
         _effect.DirectionalLight1.Enabled = false;
@@ -67,6 +78,13 @@ public class Game1 : Game
 
         _spriteBatch = new SpriteBatch(GraphicsDevice);
         _font = Content.Load<SpriteFont>("DefaultFont");
+
+        _waterEffect = Content.Load<Effect>("Water");
+        var pp = GraphicsDevice.PresentationParameters;
+        _reflectionTarget = new RenderTarget2D(GraphicsDevice, pp.BackBufferWidth, pp.BackBufferHeight, false, SurfaceFormat.Color, DepthFormat.Depth24);
+        _refractionTarget = new RenderTarget2D(GraphicsDevice, pp.BackBufferWidth, pp.BackBufferHeight, false, SurfaceFormat.Color, DepthFormat.Depth24);
+        _distortionMap = WaterTextures.CreateDistortionMap(GraphicsDevice, seed: 1);
+        _normalMap = WaterTextures.CreateNormalMap(GraphicsDevice, seed: 2);
     }
 
     protected override void Update(GameTime gameTime)
@@ -163,24 +181,19 @@ public class Game1 : Game
             _fpsTimer = 0;
         }
 
-        GraphicsDevice.Clear(Color.CornflowerBlue);
-
         GraphicsDevice.BlendState = BlendState.Opaque;
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
         GraphicsDevice.RasterizerState = RasterizerState.CullNone;
 
-        _waterPlane.UpdateWaves((float)gameTime.TotalGameTime.TotalSeconds);
+        float time = (float)gameTime.TotalGameTime.TotalSeconds;
+        _waterPlane.UpdateWaves(time);
 
-        _effect.World = Matrix.Identity;
-        _effect.View = _camera.View;
-        _effect.Projection = _camera.Projection;
+        DrawRefraction();
+        Matrix reflectionView = DrawReflection();
 
-        _effect.DiffuseColor = new Color(25, 70, 110).ToVector3();
-        _waterPlane.Draw(GraphicsDevice, _effect);
-
-        _hexGrid.Draw(GraphicsDevice, _effect, _hoveredTile);
-
-        _ship.Draw(GraphicsDevice, _effect);
+        GraphicsDevice.Clear(SkyColor);
+        DrawWater(reflectionView, time);
+        DrawScene(_camera.View);
 
         string hoverText = _hoveredTile.HasValue ? $"({_hoveredTile.Value.Q}, {_hoveredTile.Value.R})" : "none";
 
@@ -190,5 +203,69 @@ public class Game1 : Game
         _spriteBatch.End();
 
         base.Draw(gameTime);
+    }
+
+    // Nothing in the scene sits below the waterline yet, so the refraction target is just the deep-water color.
+    private void DrawRefraction()
+    {
+        GraphicsDevice.SetRenderTarget(_refractionTarget);
+        GraphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer, DeepWaterColor, 1f, 0);
+        GraphicsDevice.SetRenderTarget(null);
+    }
+
+    private Matrix DrawReflection()
+    {
+        var planeNormal = Vector3.Up;
+        var planePosition = new Vector3(0f, WaterHeight, 0f);
+        float projLength = Vector3.Dot(planeNormal, _camera.Position - planePosition);
+        var reflectionCamPos = _camera.Position - 2f * planeNormal * projLength;
+        var reflectionCamForward = Vector3.Reflect(_camera.Forward, planeNormal);
+        var reflectionCamUp = Vector3.Reflect(_camera.Up, planeNormal);
+        var reflectionView = Matrix.CreateLookAt(reflectionCamPos, reflectionCamPos + reflectionCamForward, reflectionCamUp);
+
+        GraphicsDevice.SetRenderTarget(_reflectionTarget);
+        GraphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer, SkyColor, 1f, 0);
+        DrawScene(reflectionView);
+        GraphicsDevice.SetRenderTarget(null);
+
+        return reflectionView;
+    }
+
+    private void DrawScene(Matrix view)
+    {
+        _effect.View = view;
+        _effect.Projection = _camera.Projection;
+        _hexGrid.Draw(GraphicsDevice, _effect, _hoveredTile);
+        _ship.Draw(GraphicsDevice, _effect);
+    }
+
+    private void DrawWater(Matrix reflectionView, float time)
+    {
+        var world = Matrix.Identity;
+        var p = _waterEffect.Parameters;
+
+        p["World"].SetValue(world);
+        p["WorldViewProjection"].SetValue(world * _camera.View * _camera.Projection);
+        p["ReflectionView"].SetValue(reflectionView);
+        p["Projection"].SetValue(_camera.Projection);
+
+        p["ReflectionTexture"].SetValue(_reflectionTarget);
+        p["RefractionTexture"].SetValue(_refractionTarget);
+        p["DistortionMap"].SetValue(_distortionMap);
+        p["NormalMap"].SetValue(_normalMap);
+        p["Tiling"].SetValue(Vector2.One * 12f);
+
+        p["MoveFactor"].SetValue(WaveSpeed * time % 1f);
+        p["WaveStrength"].SetValue(0.01f);
+        p["FresnelPower"].SetValue(2f);
+
+        p["CameraPosition"].SetValue(_camera.Position);
+        p["LightPosition"].SetValue(-LightDirection * 10000f);
+        p["LightColor"].SetValue(Color.White.ToVector3());
+        p["Shininess"].SetValue(25f);
+        p["KSpecular"].SetValue(0.3f);
+
+        _waterEffect.CurrentTechnique = _waterEffect.Techniques["Water"];
+        _waterPlane.Draw(GraphicsDevice, _waterEffect);
     }
 }
