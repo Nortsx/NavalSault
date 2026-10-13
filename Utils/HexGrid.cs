@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace NavalSault;
+namespace NavalSault.Utils;
 
 public class HexGrid
 {
@@ -55,6 +55,13 @@ public class HexGrid
     {
         var (q, r) = WorldToAxial(worldPosition);
         return TryGetTilePosition(q, r, out tilePosition);
+    }
+
+    public static int Distance((int Q, int R) a, (int Q, int R) b)
+    {
+        int dq = a.Q - b.Q;
+        int dr = a.R - b.R;
+        return (Math.Abs(dq) + Math.Abs(dr) + Math.Abs(dq + dr)) / 2;
     }
 
     private static (int Q, int R) AxialRound(float qf, float rf)

@@ -2,7 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace NavalSault;
+namespace NavalSault.Utils;
 
 // Procedural stand-ins for the DuDv and normal map images. Integer wave frequencies keep both maps seamlessly tileable.
 public static class WaterTextures

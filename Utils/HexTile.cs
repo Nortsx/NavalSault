@@ -2,7 +2,7 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace NavalSault;
+namespace NavalSault.Utils;
 
 public class HexTile
 {

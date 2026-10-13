@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using NavalSault.Utils;
 
-namespace NavalSault;
+namespace NavalSault.GameLogic;
 
 public class Ship
 {
@@ -17,30 +18,46 @@ public class Ship
     private readonly Color _selectedColor;
 
     private Vector3 _targetPosition;
+    private readonly Queue<(Vector3 Position, HexDirection Facing)> _waypoints = new();
 
     public Vector3 Position { get; private set; }
     public bool IsSelected { get; set; }
     public bool IsMoving { get; private set; }
     public float FootprintRadius { get; }
+    // Bow direction; turns to each leg's direction as the ship moves along a path.
+    public HexDirection Facing { get; private set; }
 
-    public Ship(GraphicsDevice graphicsDevice, Vector3 startPosition, float size, Color baseColor, Color selectedColor)
+    public int Initiative { get; }
+    // Movement radius in hex tiles.
+    public int MoveRadius { get; }
+    public Weapon Weapon { get; set; }
+
+    public Ship(GraphicsDevice graphicsDevice, Vector3 startPosition, float size, Color baseColor, Color selectedColor,
+        HexDirection facing, int initiative, int moveRadius, Weapon weapon)
     {
+        Facing = facing;
+        Initiative = initiative;
+        MoveRadius = moveRadius;
+        Weapon = weapon;
         Position = startPosition;
         _targetPosition = startPosition;
         _baseColor = baseColor;
         _selectedColor = selectedColor;
         FootprintRadius = size * 0.75f;
 
-        float h = size / 2f;
+        // Hull is longer along -Z (the bow) than it is wide, so the facing is visible.
+        float hw = size * 0.3f;
+        float hl = size * 0.7f;
+        float height = size * 0.6f;
 
-        Vector3 p000 = new Vector3(-h, 0f, -h);
-        Vector3 p100 = new Vector3(h, 0f, -h);
-        Vector3 p110 = new Vector3(h, 0f, h);
-        Vector3 p010 = new Vector3(-h, 0f, h);
-        Vector3 p001 = new Vector3(-h, size, -h);
-        Vector3 p101 = new Vector3(h, size, -h);
-        Vector3 p111 = new Vector3(h, size, h);
-        Vector3 p011 = new Vector3(-h, size, h);
+        Vector3 p000 = new Vector3(-hw, 0f, -hl);
+        Vector3 p100 = new Vector3(hw, 0f, -hl);
+        Vector3 p110 = new Vector3(hw, 0f, hl);
+        Vector3 p010 = new Vector3(-hw, 0f, hl);
+        Vector3 p001 = new Vector3(-hw, height, -hl);
+        Vector3 p101 = new Vector3(hw, height, -hl);
+        Vector3 p111 = new Vector3(hw, height, hl);
+        Vector3 p011 = new Vector3(-hw, height, hl);
 
         var vertices = new List<VertexPositionNormalTexture>();
         var indices = new List<ushort>();
@@ -79,10 +96,24 @@ public class Ship
         indices.Add((ushort)(baseIndex + 3));
     }
 
-    public void MoveTo(Vector3 destination)
+    // Each waypoint carries the direction of the leg leading into it.
+    public void MoveAlong(IEnumerable<(Vector3 Position, HexDirection Facing)> waypoints)
     {
-        _targetPosition = new Vector3(destination.X, Position.Y, destination.Z);
-        IsMoving = true;
+        _waypoints.Clear();
+        foreach (var (position, facing) in waypoints)
+            _waypoints.Enqueue((new Vector3(position.X, Position.Y, position.Z), facing));
+
+        StartNextLeg();
+    }
+
+    private void StartNextLeg()
+    {
+        IsMoving = _waypoints.TryDequeue(out var waypoint);
+        if (!IsMoving)
+            return;
+
+        _targetPosition = waypoint.Position;
+        Facing = waypoint.Facing;
     }
 
     public void Update(GameTime gameTime)
@@ -97,7 +128,7 @@ public class Ship
         if (step >= distance || distance < 0.001f)
         {
             Position = _targetPosition;
-            IsMoving = false;
+            StartNextLeg();
         }
         else
         {
@@ -107,7 +138,7 @@ public class Ship
 
     public void Draw(GraphicsDevice graphicsDevice, BasicEffect effect)
     {
-        effect.World = Matrix.CreateTranslation(Position);
+        effect.World = Matrix.CreateRotationY(HexDirections.ToYaw(Facing)) * Matrix.CreateTranslation(Position);
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;
         effect.TextureEnabled = false;
