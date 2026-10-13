@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using NavalSault.GameLogic.Orders;
 using NavalSault.Utils;
 
 namespace NavalSault.GameLogic;
@@ -15,35 +16,47 @@ public class Ship
     private readonly int _primitiveCount;
 
     private readonly Color _baseColor;
-    private readonly Color _selectedColor;
+    private readonly Color _activeColor;
 
-    private Vector3 _targetPosition;
-    private readonly Queue<(Vector3 Position, HexDirection Facing)> _waypoints = new();
+    private ((int Q, int R) Tile, Vector3 Position, HexDirection Facing) _target;
+    private readonly Queue<((int Q, int R) Tile, Vector3 Position, HexDirection Facing)> _waypoints = new();
 
+    public string Name { get; }
+    // Tile the ship stands on; the authoritative position for game rules. Updates as each waypoint is reached.
+    public (int Q, int R) Tile { get; private set; }
+    // World position for drawing; slides between tiles while moving.
     public Vector3 Position { get; private set; }
-    public bool IsSelected { get; set; }
-    public bool IsMoving { get; private set; }
-    public float FootprintRadius { get; }
     // Bow direction; turns to each leg's direction as the ship moves along a path.
     public HexDirection Facing { get; private set; }
+    public bool IsMoving { get; private set; }
+    // Set by the turn manager while this ship is the one taking orders.
+    public bool IsActive { get; set; }
 
     public int Initiative { get; }
-    // Movement radius in hex tiles.
-    public int MoveRadius { get; }
+    public int MaxTurnPoints { get; }
+    // Spent on orders while planning; refilled at the start of every turn.
+    public int TurnPoints { get; set; }
     public Weapon Weapon { get; set; }
 
-    public Ship(GraphicsDevice graphicsDevice, Vector3 startPosition, float size, Color baseColor, Color selectedColor,
-        HexDirection facing, int initiative, int moveRadius, Weapon weapon)
+    public List<Order> PlannedOrders { get; } = new();
+
+    // Where the ship will be once all planned orders are carried out.
+    public (int Q, int R) PlannedTile => PlannedOrders.Count > 0 ? PlannedOrders[^1].EndTile : Tile;
+    public HexDirection PlannedFacing => PlannedOrders.Count > 0 ? PlannedOrders[^1].EndFacing : Facing;
+
+    public Ship(GraphicsDevice graphicsDevice, string name, (int Q, int R) tile, Vector3 position, float size,
+        Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, Weapon weapon)
     {
+        Name = name;
+        Tile = tile;
+        Position = position;
         Facing = facing;
         Initiative = initiative;
-        MoveRadius = moveRadius;
+        MaxTurnPoints = maxTurnPoints;
+        TurnPoints = maxTurnPoints;
         Weapon = weapon;
-        Position = startPosition;
-        _targetPosition = startPosition;
         _baseColor = baseColor;
-        _selectedColor = selectedColor;
-        FootprintRadius = size * 0.75f;
+        _activeColor = activeColor;
 
         // Hull is longer along -Z (the bow) than it is wide, so the facing is visible.
         float hw = size * 0.3f;
@@ -96,24 +109,21 @@ public class Ship
         indices.Add((ushort)(baseIndex + 3));
     }
 
-    // Each waypoint carries the direction of the leg leading into it.
-    public void MoveAlong(IEnumerable<(Vector3 Position, HexDirection Facing)> waypoints)
+    // Each waypoint carries the tile, its world position and the direction of the step into it.
+    public void MoveAlong(IEnumerable<((int Q, int R) Tile, Vector3 Position, HexDirection Facing)> waypoints)
     {
         _waypoints.Clear();
-        foreach (var (position, facing) in waypoints)
-            _waypoints.Enqueue((new Vector3(position.X, Position.Y, position.Z), facing));
+        foreach (var (tile, position, facing) in waypoints)
+            _waypoints.Enqueue((tile, new Vector3(position.X, Position.Y, position.Z), facing));
 
         StartNextLeg();
     }
 
     private void StartNextLeg()
     {
-        IsMoving = _waypoints.TryDequeue(out var waypoint);
-        if (!IsMoving)
-            return;
-
-        _targetPosition = waypoint.Position;
-        Facing = waypoint.Facing;
+        IsMoving = _waypoints.TryDequeue(out _target);
+        if (IsMoving)
+            Facing = _target.Facing;
     }
 
     public void Update(GameTime gameTime)
@@ -121,13 +131,14 @@ public class Ship
         if (!IsMoving)
             return;
 
-        Vector3 toTarget = _targetPosition - Position;
+        Vector3 toTarget = _target.Position - Position;
         float distance = toTarget.Length();
         float step = MoveSpeed * (float)gameTime.ElapsedGameTime.TotalSeconds;
 
         if (step >= distance || distance < 0.001f)
         {
-            Position = _targetPosition;
+            Position = _target.Position;
+            Tile = _target.Tile;
             StartNextLeg();
         }
         else
@@ -142,7 +153,7 @@ public class Ship
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;
         effect.TextureEnabled = false;
-        effect.DiffuseColor = (IsSelected ? _selectedColor : _baseColor).ToVector3();
+        effect.DiffuseColor = (IsActive ? _activeColor : _baseColor).ToVector3();
 
         graphicsDevice.SetVertexBuffer(_vertexBuffer);
         graphicsDevice.Indices = _indexBuffer;

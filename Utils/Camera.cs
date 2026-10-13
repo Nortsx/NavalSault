@@ -8,7 +8,7 @@ namespace NavalSault.Utils;
 public class Camera
 {
     private const float PitchDegrees = 55f;
-    private const float Distance = 70f;
+    private const float Distance = 100f;
     private const float PanSpeed = 30f;
     private const float FieldOfViewDegrees = 45f;
     private const float NearPlane = 0.1f;

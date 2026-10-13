@@ -14,6 +14,7 @@ public class HexGrid
     private readonly HexTile _highlightTileMesh;
     private readonly HexFill _highlightFillMesh;
     private readonly Dictionary<(int Q, int R), Vector3> _tiles = new();
+    private readonly HashSet<(int Q, int R)> _blocked = new();
 
     public float HexRadius { get; }
     public float TileY { get; }
@@ -44,17 +45,25 @@ public class HexGrid
         return _tiles.TryGetValue((q, r), out position);
     }
 
+    public void SetBlocked((int Q, int R) tile, bool blocked)
+    {
+        if (blocked)
+            _blocked.Add(tile);
+        else
+            _blocked.Remove(tile);
+    }
+
+    // True if the tile is on the map and nothing blocks ships from entering it.
+    public bool IsPassable((int Q, int R) tile)
+    {
+        return _tiles.ContainsKey(tile) && !_blocked.Contains(tile);
+    }
+
     public (int Q, int R) WorldToAxial(Vector3 worldPosition)
     {
         float qf = (2f / 3f * worldPosition.X) / HexRadius;
         float rf = (-1f / 3f * worldPosition.X + (float)Math.Sqrt(3) / 3f * worldPosition.Z) / HexRadius;
         return AxialRound(qf, rf);
-    }
-
-    public bool TryPickTile(Vector3 worldPosition, out Vector3 tilePosition)
-    {
-        var (q, r) = WorldToAxial(worldPosition);
-        return TryGetTilePosition(q, r, out tilePosition);
     }
 
     public static int Distance((int Q, int R) a, (int Q, int R) b)
