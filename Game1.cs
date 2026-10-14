@@ -11,26 +11,51 @@ namespace NavalSault;
 
 public class Game1 : Game
 {
+    private enum ActionMode
+    {
+        Move,
+        Shoot
+    }
+
     private static readonly Color SkyColor = new(140, 185, 225);
     private static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.4f, -1f, 0.3f));
     private static readonly Color ActiveShipColor = new(255, 225, 70);
     private static readonly Color PreviewPathColor = new(255, 225, 70);
     private static readonly Color PlannedPathColor = new(255, 255, 255);
+    private static readonly Color PreviewShotColor = new(255, 90, 60);
+    private static readonly Color PlannedShotColor = new(255, 255, 255);
+    private static readonly Color ShellColor = new(255, 240, 180);
+    private static readonly Color SplashColor = new(200, 230, 255);
+    private static readonly Color HitColor = new(255, 50, 30);
+    // Shells leave from about deck height above the tile.
+    private static readonly Vector3 MuzzleOffset = new(0f, 3f, 0f);
+    // Share of the arc drawn behind the shell as a tracer.
+    private const float TracerLength = 0.2f;
+    private const float SplashHeight = 8f;
 
     private GraphicsDeviceManager _graphics;
     private BasicEffect _effect;
     private Camera _camera;
     private WaterRenderer _water;
     private HexGrid _hexGrid;
+    private HexOverlay _overlay;
     private Island _island;
     private TurnManager _turns;
     private MouseState _previousMouseState;
     private KeyboardState _previousKeyboardState;
     private (int Q, int R)? _hoveredTile;
     private List<(int Q, int R)> _previewPath;
+    // What a click on a tile does for the active ship.
+    private ActionMode _mode;
+    private ShootOrder _previewShot;
 
     private SpriteBatch _spriteBatch;
     private SpriteFont _font;
+    private Texture2D _pixel;
+    private Button _moveButton;
+    private Button _shootButton;
+    private Button _endTurnButton;
+    private Button[] _buttons;
     private int _frameCount;
     private double _fpsTimer;
     private double _fps;
@@ -72,6 +97,7 @@ public class Game1 : Game
 
         _water = new WaterRenderer(GraphicsDevice, Content.Load<Effect>("Water"), SkyColor, LightDirection);
         _hexGrid = new HexGrid(GraphicsDevice, hexRadius: 8f, gridRadius: 8, tileY: 1.3f, color: new Color(0, 255, 128), highlightColor: new Color(150, 255, 190));
+        _overlay = new HexOverlay(GraphicsDevice, _hexGrid.HexRadius);
 
         // Test island: two columns of three tiles, one tile of open water ahead of ship A.
         _island = new Island(GraphicsDevice, _hexGrid.HexRadius,
@@ -92,13 +118,20 @@ public class Game1 : Game
 
         _spriteBatch = new SpriteBatch(GraphicsDevice);
         _font = Content.Load<SpriteFont>("DefaultFont");
+        _pixel = new Texture2D(GraphicsDevice, 1, 1);
+        _pixel.SetData([Color.White]);
+        _moveButton = new Button("Move");
+        _shootButton = new Button("Shoot");
+        _endTurnButton = new Button("End Turn");
+        _buttons = [_moveButton, _shootButton, _endTurnButton];
     }
 
     private Ship CreateShip(string name, (int Q, int R) tile, Color color, int initiative)
     {
         _hexGrid.TryGetTilePosition(tile.Q, tile.R, out var position);
         return new Ship(GraphicsDevice, name, tile, position, size: 6f, baseColor: color, activeColor: ActiveShipColor,
-            facing: HexDirection.North, initiative: initiative, maxTurnPoints: 5, weapon: new Weapon("Cannon", damage: 10, range: 3));
+            facing: HexDirection.North, initiative: initiative, maxTurnPoints: 5, maxHp: 30,
+            weapon: new Weapon("Cannon", damage: 10, range: 6, shotCost: 3, spreadStep: 3));
     }
 
     protected override void Update(GameTime gameTime)
@@ -110,19 +143,54 @@ public class Game1 : Game
 
         _camera.Update(gameTime, keyboard);
 
+        if (WasPressed(keyboard, Keys.M))
+            _mode = ActionMode.Move;
+        if (WasPressed(keyboard, Keys.F))
+            _mode = ActionMode.Shoot;
         if (WasPressed(keyboard, Keys.Enter))
-            _turns.FinishActiveShip();
+            EndActiveShipTurn();
         if (WasPressed(keyboard, Keys.Back))
             _turns.UndoLastOrder();
         _previousKeyboardState = keyboard;
 
         var mouse = Mouse.GetState();
         var mousePosition = new Vector2(mouse.X, mouse.Y);
+        bool leftClicked = mouse.LeftButton == ButtonState.Pressed && _previousMouseState.LeftButton == ButtonState.Released;
 
-        UpdateHover(mousePosition);
+        if (mouse.RightButton == ButtonState.Pressed && _previousMouseState.RightButton == ButtonState.Released)
+            _mode = ActionMode.Move;
 
-        if (mouse.LeftButton == ButtonState.Pressed && _previousMouseState.LeftButton == ButtonState.Released && _hoveredTile.HasValue)
-            _turns.TryAddMove(_hoveredTile.Value);
+        UpdateButtons();
+        bool overButton = ButtonsVisible && Array.Exists(_buttons, b => b.Contains(mouse.Position));
+
+        if (leftClicked && _moveButton.IsEnabled && _moveButton.Contains(mouse.Position))
+            _mode = ActionMode.Move;
+        if (leftClicked && _shootButton.IsEnabled && _shootButton.Contains(mouse.Position))
+            _mode = ActionMode.Shoot;
+        if (leftClicked && _endTurnButton.IsEnabled && _endTurnButton.Contains(mouse.Position))
+            EndActiveShipTurn();
+        // Switching mode by key or click may have picked one the ship can't use.
+        UpdateButtons();
+
+        // The buttons sit on top of the map, so the map ignores the mouse while it's over them.
+        if (overButton)
+        {
+            _hoveredTile = null;
+            _previewPath = null;
+            _previewShot = null;
+        }
+        else
+        {
+            UpdateHover(mousePosition);
+        }
+
+        if (leftClicked && !overButton && _hoveredTile.HasValue)
+        {
+            if (_mode == ActionMode.Move)
+                _turns.TryAddMove(_hoveredTile.Value);
+            else if (_turns.TryAddShot(_hoveredTile.Value))
+                _mode = ActionMode.Move;
+        }
         _previousMouseState = mouse;
 
         _turns.Update(gameTime);
@@ -135,17 +203,63 @@ public class Game1 : Game
         return keyboard.IsKeyDown(key) && _previousKeyboardState.IsKeyUp(key);
     }
 
-    // Highlights the hovered tile and previews the active ship's path to it, if it can get there.
+    // The active ship is done taking orders; the next one takes over, or the turn resolves after the last.
+    private void EndActiveShipTurn()
+    {
+        _turns.FinishActiveShip();
+        _mode = ActionMode.Move;
+    }
+
+    // Buttons only matter while a ship is taking orders.
+    private bool ButtonsVisible => _turns.Phase == TurnPhase.Planning;
+
+    // Lays the mode buttons out along the bottom centre and End Turn at the bottom right,
+    // and enables only what the active ship can do. Falls back to Move if the ship can't afford a shot.
+    private void UpdateButtons()
+    {
+        const int width = 160, height = 44, gap = 12, margin = 20;
+
+        var viewport = GraphicsDevice.Viewport;
+        int left = viewport.Width / 2 - width - gap / 2;
+        int top = viewport.Height - height - margin;
+        _moveButton.Bounds = new Rectangle(left, top, width, height);
+        _shootButton.Bounds = new Rectangle(left + width + gap, top, width, height);
+        _endTurnButton.Bounds = new Rectangle(viewport.Width - width - margin, top, width, height);
+
+        var ship = _turns.ActiveShip;
+        _moveButton.IsEnabled = ship != null;
+        _endTurnButton.IsEnabled = ship != null;
+        _shootButton.IsEnabled = ship?.Weapon != null && ship.TurnPoints >= ship.Weapon.ShotCost;
+        _shootButton.Label = ship?.Weapon != null ? $"Shoot ({ship.Weapon.ShotCost} TP)" : "Shoot";
+
+        if (!_shootButton.IsEnabled)
+            _mode = ActionMode.Move;
+
+        _moveButton.IsSelected = _moveButton.IsEnabled && _mode == ActionMode.Move;
+        _shootButton.IsSelected = _shootButton.IsEnabled && _mode == ActionMode.Shoot;
+    }
+
+    // Highlights the hovered tile and previews the active ship's path to it, if it can get there,
+    // or, while aiming, the shot at it and where the shell may land.
     private void UpdateHover(Vector2 mousePosition)
     {
         _hoveredTile = null;
         _previewPath = null;
+        _previewShot = null;
 
         var picked = PickPlane(mousePosition, _hexGrid.TileY);
         if (picked == null)
             return;
 
         var tile = _hexGrid.WorldToAxial(picked.Value);
+        if (_mode == ActionMode.Shoot)
+        {
+            _previewShot = _turns.PlanShot(tile);
+            if (_previewShot != null)
+                _hoveredTile = tile;
+            return;
+        }
+
         _previewPath = _turns.PlanMove(tile);
         if (_previewPath != null)
             _hoveredTile = tile;
@@ -207,14 +321,34 @@ public class Game1 : Game
 
     private void DrawHud()
     {
-        string status = _turns.Phase == TurnPhase.Planning
-            ? $"Turn {_turns.TurnNumber}  |  Planning  |  Active: {_turns.ActiveShip.Name}  |  TP {_turns.ActiveShip.TurnPoints}/{_turns.ActiveShip.MaxTurnPoints}"
-            : $"Turn {_turns.TurnNumber}  |  Resolving";
+        string status = _turns.Phase switch
+        {
+            TurnPhase.Planning =>
+                $"Turn {_turns.TurnNumber}  |  Planning  |  Active: {_turns.ActiveShip.Name}  |  TP {_turns.ActiveShip.TurnPoints}/{_turns.ActiveShip.MaxTurnPoints}",
+            TurnPhase.Resolving => $"Turn {_turns.TurnNumber}  |  Resolving",
+            _ => _turns.Ships.Count == 1 ? $"Game over  |  {_turns.Ships[0].Name} wins" : "Game over  |  Every ship sank"
+        };
 
         _spriteBatch.Begin();
         _spriteBatch.DrawString(_font, $"FPS: {_fps:0}", new Vector2(10, 10), Color.White);
         _spriteBatch.DrawString(_font, status, new Vector2(10, 30), Color.White);
-        _spriteBatch.DrawString(_font, "Click: move   Backspace: undo   Enter: finish ship", new Vector2(10, 50), Color.White);
+        _spriteBatch.DrawString(_font, "M: move   F: shoot   Right click: back to move   Backspace: undo   Enter: finish ship",
+            new Vector2(10, 50), Color.White);
+
+        if (ButtonsVisible)
+        {
+            var mousePosition = Mouse.GetState().Position;
+            foreach (var button in _buttons)
+                button.Draw(_spriteBatch, _pixel, _font, mousePosition);
+        }
+
+        float y = 80;
+        foreach (var ship in _turns.Ships)
+        {
+            string weapon = ship.Weapon == null ? "" : $"  |  {ship.Weapon.Name}: range {ship.Weapon.Range}, {ship.Weapon.ShotCost} TP";
+            _spriteBatch.DrawString(_font, $"{ship.Name}  HP {ship.Hp}/{ship.MaxHp}{weapon}", new Vector2(10, y), Color.White);
+            y += 20;
+        }
         _spriteBatch.End();
     }
 
@@ -240,13 +374,48 @@ public class Game1 : Game
             {
                 if (order is MoveOrder move)
                     PathLine.Draw(GraphicsDevice, _effect, ToWorldPositions(move.Path), PlannedPathColor);
+                else if (order is ShootOrder shot && shot != _turns.ResolvingOrder)
+                    DrawShotPlan(shot, PlannedShotColor, fillAlpha: 0.12f);
             }
         }
 
         if (_previewPath != null)
             PathLine.Draw(GraphicsDevice, _effect, ToWorldPositions(_previewPath), PreviewPathColor);
+        if (_previewShot != null)
+            DrawShotPlan(_previewShot, PreviewShotColor, fillAlpha: 0.3f);
+        if (_turns.ResolvingOrder is ShootOrder firing)
+            DrawShotInFlight(firing);
 
         foreach (var ship in _turns.Ships)
             ship.Draw(GraphicsDevice, _effect);
+    }
+
+    // The arc from the firing tile to the aimed-at tile, and every tile the shell may land on.
+    private void DrawShotPlan(ShootOrder shot, Color color, float fillAlpha)
+    {
+        var from = _hexGrid.AxialToWorld(shot.FiringTile) + MuzzleOffset;
+        var to = _hexGrid.AxialToWorld(shot.TargetTile);
+        PathLine.Draw(GraphicsDevice, _effect, ShotArc.Points(from, to, 0f, 1f, 24), color);
+
+        _overlay.Draw(GraphicsDevice, _effect, _hexGrid, shot.SpreadTiles, color, fillAlpha);
+        _overlay.Draw(GraphicsDevice, _effect, _hexGrid, [shot.TargetTile], color, fillAlpha);
+    }
+
+    // A tracer following the shell, then a splash column on the tile it landed on.
+    private void DrawShotInFlight(ShootOrder shot)
+    {
+        var from = _hexGrid.AxialToWorld(shot.FiringTile) + MuzzleOffset;
+        var to = _hexGrid.AxialToWorld(shot.LandingTile);
+
+        if (!shot.HasLanded)
+        {
+            float t = shot.FlightProgress;
+            PathLine.Draw(GraphicsDevice, _effect, ShotArc.Points(from, to, Math.Max(0f, t - TracerLength), t, 8), ShellColor);
+            return;
+        }
+
+        var color = shot.HitShip != null ? HitColor : SplashColor;
+        _overlay.Draw(GraphicsDevice, _effect, _hexGrid, [shot.LandingTile], color, fillAlpha: 0.6f);
+        PathLine.Draw(GraphicsDevice, _effect, [to, to + new Vector3(0f, SplashHeight, 0f)], color);
     }
 }

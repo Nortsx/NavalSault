@@ -38,6 +38,10 @@ public class Ship
     public int TurnPoints { get; set; }
     public Weapon Weapon { get; set; }
 
+    public int MaxHp { get; }
+    public int Hp { get; private set; }
+    public bool IsSunk => Hp <= 0;
+
     public List<Order> PlannedOrders { get; } = new();
 
     // Where the ship will be once all planned orders are carried out.
@@ -45,7 +49,7 @@ public class Ship
     public HexDirection PlannedFacing => PlannedOrders.Count > 0 ? PlannedOrders[^1].EndFacing : Facing;
 
     public Ship(GraphicsDevice graphicsDevice, string name, (int Q, int R) tile, Vector3 position, float size,
-        Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, Weapon weapon)
+        Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, int maxHp, Weapon weapon)
     {
         Name = name;
         Tile = tile;
@@ -55,6 +59,8 @@ public class Ship
         MaxTurnPoints = maxTurnPoints;
         TurnPoints = maxTurnPoints;
         Weapon = weapon;
+        MaxHp = maxHp;
+        Hp = maxHp;
         _baseColor = baseColor;
         _activeColor = activeColor;
 
@@ -109,6 +115,17 @@ public class Ship
         indices.Add((ushort)(baseIndex + 3));
     }
 
+    // True if the ship sits on the tile and can be hit there.
+    public bool Occupies((int Q, int R) tile)
+    {
+        return !IsSunk && Tile == tile;
+    }
+
+    public void TakeDamage(int damage)
+    {
+        Hp = Math.Max(0, Hp - damage);
+    }
+
     // Each waypoint carries the tile, its world position and the direction of the step into it.
     public void MoveAlong(IEnumerable<((int Q, int R) Tile, Vector3 Position, HexDirection Facing)> waypoints)
     {
@@ -149,6 +166,9 @@ public class Ship
 
     public void Draw(GraphicsDevice graphicsDevice, BasicEffect effect)
     {
+        if (IsSunk)
+            return;
+
         effect.World = Matrix.CreateRotationY(HexDirections.ToYaw(Facing)) * Matrix.CreateTranslation(Position);
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;

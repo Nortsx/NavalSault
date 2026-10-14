@@ -32,12 +32,21 @@ public class HexGrid
             int rMin = Math.Max(-gridRadius, -q - gridRadius);
             int rMax = Math.Min(gridRadius, -q + gridRadius);
             for (int r = rMin; r <= rMax; r++)
-            {
-                float x = hexRadius * 1.5f * q;
-                float z = hexRadius * (float)Math.Sqrt(3) * (r + q / 2f);
-                _tiles[(q, r)] = new Vector3(x, tileY, z);
-            }
+                _tiles[(q, r)] = AxialToWorld((q, r));
         }
+    }
+
+    // Center of a tile, whether it's on the map or not.
+    public Vector3 AxialToWorld((int Q, int R) tile)
+    {
+        float x = HexRadius * 1.5f * tile.Q;
+        float z = HexRadius * (float)Math.Sqrt(3) * (tile.R + tile.Q / 2f);
+        return new Vector3(x, TileY, z);
+    }
+
+    public bool IsOnMap((int Q, int R) tile)
+    {
+        return _tiles.ContainsKey(tile);
     }
 
     public bool TryGetTilePosition(int q, int r, out Vector3 position)
@@ -71,6 +80,18 @@ public class HexGrid
         int dq = a.Q - b.Q;
         int dr = a.R - b.R;
         return (Math.Abs(dq) + Math.Abs(dr) + Math.Abs(dq + dr)) / 2;
+    }
+
+    // Every tile at most radius tiles from center, center included, whether on the map or not.
+    public static IEnumerable<(int Q, int R)> TilesWithin((int Q, int R) center, int radius)
+    {
+        for (int dq = -radius; dq <= radius; dq++)
+        {
+            int drMin = Math.Max(-radius, -dq - radius);
+            int drMax = Math.Min(radius, -dq + radius);
+            for (int dr = drMin; dr <= drMax; dr++)
+                yield return (center.Q + dq, center.R + dr);
+        }
     }
 
     private static (int Q, int R) AxialRound(float qf, float rf)

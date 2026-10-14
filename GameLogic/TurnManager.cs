@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
@@ -11,7 +12,9 @@ public enum TurnPhase
     // Ships take orders one at a time, highest Initiative first.
     Planning,
     // Orders are carried out ship by ship in the same order.
-    Resolving
+    Resolving,
+    // At most one ship is left afloat.
+    GameOver
 }
 
 public class TurnManager
@@ -20,16 +23,18 @@ public class TurnManager
     private readonly List<Ship> _ships;
     private readonly HexGrid _grid;
     private readonly MovePathfinder _pathfinder;
+    private readonly Random _random = new();
 
     private int _activeIndex;
     private int _resolvingShipIndex;
     private int _resolvingOrderIndex;
-    private bool _orderStarted;
 
     public IReadOnlyList<Ship> Ships => _ships;
     public int TurnNumber { get; private set; }
     public TurnPhase Phase { get; private set; }
     public Ship ActiveShip => Phase == TurnPhase.Planning ? _ships[_activeIndex] : null;
+    // The order being carried out right now while resolving, or null.
+    public Order ResolvingOrder { get; private set; }
 
     public TurnManager(IEnumerable<Ship> ships, HexGrid grid, MovePathfinder pathfinder)
     {
@@ -58,6 +63,27 @@ public class TurnManager
     {
         var path = PlanMove(target);
         return path != null && TryAddOrder(new MoveOrder(ActiveShip, path, _grid));
+    }
+
+    // A shot the active ship would fire at the tile from where its planned orders leave it.
+    // Null if it's not planning time, the ship lacks a weapon or the turn points, or the tile is off the map or out of range.
+    public ShootOrder PlanShot((int Q, int R) target)
+    {
+        var ship = ActiveShip;
+        if (ship?.Weapon == null || ship.Weapon.ShotCost > ship.TurnPoints || !_grid.IsOnMap(target))
+            return null;
+
+        int distance = HexGrid.Distance(ship.PlannedTile, target);
+        if (distance < 1 || distance > ship.Weapon.Range)
+            return null;
+
+        return new ShootOrder(ship, ship.Weapon, ship.PlannedTile, ship.PlannedFacing, target, _ships, _random);
+    }
+
+    public bool TryAddShot((int Q, int R) target)
+    {
+        var shot = PlanShot(target);
+        return shot != null && TryAddOrder(shot);
     }
 
     public bool TryAddOrder(Order order)
@@ -100,7 +126,7 @@ public class TurnManager
         Phase = TurnPhase.Resolving;
         _resolvingShipIndex = 0;
         _resolvingOrderIndex = 0;
-        _orderStarted = false;
+        ResolvingOrder = null;
     }
 
     public void Update(GameTime gameTime)
@@ -113,30 +139,30 @@ public class TurnManager
     }
 
     // Steps through every ship's orders in turn order, one at a time; starts the next turn when all are done.
+    // A ship sunk earlier in the turn drops the rest of its orders.
     private void Resolve(GameTime gameTime)
     {
         while (_resolvingShipIndex < _ships.Count)
         {
-            var orders = _ships[_resolvingShipIndex].PlannedOrders;
-            if (_resolvingOrderIndex >= orders.Count)
+            var ship = _ships[_resolvingShipIndex];
+            if (ship.IsSunk || _resolvingOrderIndex >= ship.PlannedOrders.Count)
             {
                 _resolvingShipIndex++;
                 _resolvingOrderIndex = 0;
                 continue;
             }
 
-            var order = orders[_resolvingOrderIndex];
-            if (!_orderStarted)
+            if (ResolvingOrder == null)
             {
-                order.Begin();
-                _orderStarted = true;
+                ResolvingOrder = ship.PlannedOrders[_resolvingOrderIndex];
+                ResolvingOrder.Begin();
             }
 
-            if (!order.Update(gameTime))
+            if (!ResolvingOrder.Update(gameTime))
                 return;
 
             _resolvingOrderIndex++;
-            _orderStarted = false;
+            ResolvingOrder = null;
         }
 
         StartTurn();
@@ -144,6 +170,18 @@ public class TurnManager
 
     private void StartTurn()
     {
+        _ships.RemoveAll(s => s.IsSunk);
+        if (_ships.Count < 2)
+        {
+            Phase = TurnPhase.GameOver;
+            foreach (var ship in _ships)
+            {
+                ship.PlannedOrders.Clear();
+                ship.IsActive = false;
+            }
+            return;
+        }
+
         TurnNumber++;
         Phase = TurnPhase.Planning;
         _activeIndex = 0;
