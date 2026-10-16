@@ -112,6 +112,23 @@ public class Camera
             RecomputeView();
     }
 
+    // Where the ray through a screen point hits the horizontal plane at planeY, or null if it never does.
+    public Vector3? PickPlane(Viewport viewport, Vector2 screenPosition, float planeY)
+    {
+        var near = viewport.Unproject(new Vector3(screenPosition, 0f), Projection, View, Matrix.Identity);
+        var far = viewport.Unproject(new Vector3(screenPosition, 1f), Projection, View, Matrix.Identity);
+
+        Vector3 direction = far - near;
+        if (Math.Abs(direction.Y) < 1e-6f)
+            return null;
+
+        float t = (planeY - near.Y) / direction.Y;
+        if (t < 0f)
+            return null;
+
+        return near + direction * t;
+    }
+
     private void RecomputeView()
     {
         float pitchRad = MathHelper.ToRadians(PitchDegrees);
