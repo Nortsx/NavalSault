@@ -27,6 +27,12 @@ public class Game1 : Game
     private static readonly Color ShellColor = new(255, 240, 180);
     private static readonly Color SplashColor = new(200, 230, 255);
     private static readonly Color HitColor = new(255, 50, 30);
+    private static readonly Color EnemyShipColor = new(70, 70, 78);
+    private static readonly Color PlayerHpColor = new(90, 220, 110);
+    private static readonly Color EnemyHpColor = new(230, 60, 50);
+    private static readonly Color HpBackColor = Color.Black * 0.75f;
+    // Health bars float this far above a ship's anchor tile.
+    private static readonly Vector3 HpBarOffset = new(0f, 9f, 0f);
     // Shells leave from about deck height above the tile.
     private static readonly Vector3 MuzzleOffset = new(0f, 3f, 0f);
     // Share of the arc drawn behind the shell as a tracer.
@@ -111,10 +117,12 @@ public class Game1 : Game
         foreach (var tile in _island.Tiles)
             _hexGrid.SetBlocked(tile, true);
 
+        // The enemy waits behind the island, bow towards it, just out of reach of Ship A's guns.
         var ships = new[]
         {
-            CreateShip("Ship A", HexFootprint.Line1x3, (0, 0), new Color(200, 60, 40), initiative: 5),
-            CreateShip("Ship B", HexFootprint.Wide2x3, (3, -1), new Color(60, 90, 200), initiative: 3)
+            CreateShip("Ship A", Side.Player, HexFootprint.Line1x3, (0, 0), HexDirection.North, new Color(200, 60, 40), initiative: 5),
+            CreateShip("Ship B", Side.Player, HexFootprint.Wide2x3, (3, -1), HexDirection.North, new Color(60, 90, 200), initiative: 3),
+            CreateShip("Enemy", Side.Enemy, HexFootprint.Line1x3, (0, -7), HexDirection.South, EnemyShipColor, initiative: 4)
         };
         _turns = new TurnManager(ships, _hexGrid, new MovePathfinder(_hexGrid));
 
@@ -131,10 +139,10 @@ public class Game1 : Game
         _buttons = [_moveButton, _shootButton, _endTurnButton];
     }
 
-    private Ship CreateShip(string name, HexFootprint footprint, (int Q, int R) tile, Color color, int initiative)
+    private Ship CreateShip(string name, Side side, HexFootprint footprint, (int Q, int R) tile, HexDirection facing, Color color, int initiative)
     {
-        return new Ship(GraphicsDevice, _hexGrid, name, footprint, tile, baseColor: color, activeColor: ActiveShipColor,
-            facing: HexDirection.North, initiative: initiative, maxTurnPoints: 5, maxHp: 30,
+        return new Ship(GraphicsDevice, _hexGrid, name, side, footprint, tile, baseColor: color, activeColor: ActiveShipColor,
+            facing: facing, initiative: initiative, maxTurnPoints: 5, maxHp: 30,
             weapon: new Weapon("Cannon", damage: 10, range: 6, shotCost: 3, spreadStep: 3));
     }
 
@@ -361,10 +369,16 @@ public class Game1 : Game
             TurnPhase.Planning =>
                 $"Turn {_turns.TurnNumber}  |  Planning  |  Active: {_turns.ActiveShip.Name}  |  TP {_turns.ActiveShip.TurnPoints}/{_turns.ActiveShip.MaxTurnPoints}",
             TurnPhase.Resolving => $"Turn {_turns.TurnNumber}  |  Resolving",
-            _ => _turns.Ships.Count == 1 ? $"Game over  |  {_turns.Ships[0].Name} wins" : "Game over  |  Every ship sank"
+            _ => _turns.Winner switch
+            {
+                Side.Player => "Victory  |  Every enemy ship sunk",
+                Side.Enemy => "Defeat  |  Your fleet was sunk",
+                _ => "Game over  |  Every ship sank"
+            }
         };
 
         _spriteBatch.Begin();
+        DrawHpBars();
         _spriteBatch.DrawString(_font, $"FPS: {_fps:0}", new Vector2(10, 10), Color.White);
         _spriteBatch.DrawString(_font, status, new Vector2(10, 30), Color.White);
         _spriteBatch.DrawString(_font, "M: move   F: shoot   Q/E: end facing   Right click: back to move   Wheel: zoom   Backspace: undo   Enter: finish ship",
@@ -381,10 +395,35 @@ public class Game1 : Game
         foreach (var ship in _turns.Ships)
         {
             string weapon = ship.Weapon == null ? "" : $"  |  {ship.Weapon.Name}: range {ship.Weapon.Range}, {ship.Weapon.ShotCost} TP";
-            _spriteBatch.DrawString(_font, $"{ship.Name} ({ship.Footprint.Name})  HP {ship.Hp}/{ship.MaxHp}{weapon}", new Vector2(10, y), Color.White);
+            string side = ship.IsPlayerControlled ? "" : " [enemy]";
+            string hp = ship.IsSunk ? "SUNK" : $"HP {ship.Hp}/{ship.MaxHp}";
+            _spriteBatch.DrawString(_font, $"{ship.Name}{side} ({ship.Footprint.Name})  {hp}{weapon}", new Vector2(10, y), Color.White);
             y += 20;
         }
         _spriteBatch.End();
+    }
+
+    // A health bar over every ship still afloat, green for the player's and red for the enemy's.
+    private void DrawHpBars()
+    {
+        const int width = 60, height = 7, border = 1;
+
+        foreach (var ship in _turns.Ships)
+        {
+            if (ship.IsSunk)
+                continue;
+
+            var screen = GraphicsDevice.Viewport.Project(ship.Position + HpBarOffset, _camera.Projection, _camera.View, Matrix.Identity);
+            if (screen.Z < 0f || screen.Z > 1f)
+                continue;
+
+            int left = (int)screen.X - width / 2;
+            int top = (int)screen.Y - height / 2;
+            int filled = (int)Math.Ceiling((width - 2 * border) * (float)ship.Hp / ship.MaxHp);
+            _spriteBatch.Draw(_pixel, new Rectangle(left, top, width, height), HpBackColor);
+            _spriteBatch.Draw(_pixel, new Rectangle(left + border, top + border, filled, height - 2 * border),
+                ship.IsPlayerControlled ? PlayerHpColor : EnemyHpColor);
+        }
     }
 
     // Hex tiles are a gameplay overlay, not world geometry, so only ships get reflected.

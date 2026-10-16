@@ -11,6 +11,11 @@ namespace NavalSault.GameLogic;
 public class Ship
 {
     private const float MoveSpeed = 18f;
+    // How long a sunk hull takes to slip under, and how deep and how far over it goes.
+    private const float SinkDuration = 2.5f;
+    private const float SinkDepth = 7f;
+    private static readonly float SinkRoll = MathHelper.ToRadians(35f);
+    private static readonly float SinkPitch = MathHelper.ToRadians(12f);
 
     private readonly VertexBuffer _vertexBuffer;
     private readonly IndexBuffer _indexBuffer;
@@ -19,10 +24,14 @@ public class Ship
     private readonly Color _baseColor;
     private readonly Color _activeColor;
 
+    private float _sinkElapsed;
+
     private ((int Q, int R) Tile, Vector3 Position, HexDirection Facing) _target;
     private readonly Queue<((int Q, int R) Tile, Vector3 Position, HexDirection Facing)> _waypoints = new();
 
     public string Name { get; }
+    public Side Side { get; }
+    public bool IsPlayerControlled => Side == Side.Player;
     // Tiles the hull covers around its anchor tile.
     public HexFootprint Footprint { get; }
     // Anchor tile the ship stands on; the authoritative position for game rules. Updates as each waypoint is reached.
@@ -43,7 +52,10 @@ public class Ship
 
     public int MaxHp { get; }
     public int Hp { get; private set; }
+    // A sunk ship is out of the fight at once: it can't be hit, block tiles or carry out orders.
     public bool IsSunk => Hp <= 0;
+    // Still slipping under after being sunk; the turn waits for it before moving on.
+    public bool IsSinking => IsSunk && _sinkElapsed < SinkDuration;
 
     public List<Order> PlannedOrders { get; } = new();
 
@@ -55,10 +67,11 @@ public class Ship
     public IEnumerable<(int Q, int R)> Tiles => Footprint.Tiles(Tile, Facing);
     public IEnumerable<(int Q, int R)> PlannedTiles => Footprint.Tiles(PlannedTile, PlannedFacing);
 
-    public Ship(GraphicsDevice graphicsDevice, HexGrid grid, string name, HexFootprint footprint, (int Q, int R) tile,
+    public Ship(GraphicsDevice graphicsDevice, HexGrid grid, string name, Side side, HexFootprint footprint, (int Q, int R) tile,
         Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, int maxHp, Weapon weapon)
     {
         Name = name;
+        Side = side;
         Footprint = footprint;
         Tile = tile;
         grid.TryGetTilePosition(tile.Q, tile.R, out var position);
@@ -142,9 +155,19 @@ public class Ship
         return !IsSunk && Tiles.Contains(tile);
     }
 
+    // Taking the last hit point sinks the ship and starts it going under.
     public void TakeDamage(int damage)
     {
+        if (IsSunk)
+            return;
+
         Hp = Math.Max(0, Hp - damage);
+        if (IsSunk)
+        {
+            _sinkElapsed = 0f;
+            _waypoints.Clear();
+            IsMoving = false;
+        }
     }
 
     // Each waypoint carries the tile, its world position and the direction of the step into it.
@@ -166,6 +189,12 @@ public class Ship
 
     public void Update(GameTime gameTime)
     {
+        if (IsSinking)
+        {
+            _sinkElapsed += (float)gameTime.ElapsedGameTime.TotalSeconds;
+            return;
+        }
+
         if (!IsMoving)
             return;
 
@@ -187,10 +216,19 @@ public class Ship
 
     public void Draw(GraphicsDevice graphicsDevice, BasicEffect effect)
     {
-        if (IsSunk)
+        if (IsSunk && !IsSinking)
             return;
 
-        effect.World = Matrix.CreateRotationY(HexDirections.ToYaw(Facing)) * Matrix.CreateTranslation(Position);
+        // A sinking hull lists to starboard and dips its bow while it settles under the water, slowly at first.
+        var sink = Matrix.Identity;
+        if (IsSunk)
+        {
+            float t = _sinkElapsed / SinkDuration;
+            sink = Matrix.CreateRotationZ(-SinkRoll * MathF.Sqrt(t)) * Matrix.CreateRotationX(-SinkPitch * t)
+                * Matrix.CreateTranslation(0f, -SinkDepth * t * t, 0f);
+        }
+
+        effect.World = sink * Matrix.CreateRotationY(HexDirections.ToYaw(Facing)) * Matrix.CreateTranslation(Position);
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;
         effect.TextureEnabled = false;

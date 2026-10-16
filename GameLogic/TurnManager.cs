@@ -9,11 +9,11 @@ namespace NavalSault.GameLogic;
 
 public enum TurnPhase
 {
-    // Ships take orders one at a time, highest Initiative first.
+    // Player ships take orders one at a time, highest Initiative first.
     Planning,
     // Orders are carried out ship by ship in the same order.
     Resolving,
-    // At most one ship is left afloat.
+    // One side, or both, has no ships left afloat.
     GameOver
 }
 
@@ -35,6 +35,8 @@ public class TurnManager
     public Ship ActiveShip => Phase == TurnPhase.Planning ? _ships[_activeIndex] : null;
     // The order being carried out right now while resolving, or null.
     public Order ResolvingOrder { get; private set; }
+    // The side still afloat once the game is over; null while playing, or if both sides sank.
+    public Side? Winner { get; private set; }
 
     public TurnManager(IEnumerable<Ship> ships, HexGrid grid, MovePathfinder pathfinder)
     {
@@ -110,14 +112,14 @@ public class TurnManager
         ship.TurnPoints += order.TurnPointCost;
     }
 
-    // The active ship is done taking orders; hand over to the next one, or resolve after the last.
+    // The active ship is done taking orders; hand over to the next player ship, or resolve after the last.
     public void FinishActiveShip()
     {
         if (Phase != TurnPhase.Planning)
             return;
 
         _ships[_activeIndex].IsActive = false;
-        _activeIndex++;
+        _activeIndex = NextPlayerShipIndex(_activeIndex + 1);
 
         if (_activeIndex < _ships.Count)
         {
@@ -167,27 +169,16 @@ public class TurnManager
             ResolvingOrder = null;
         }
 
+        // Let ships sunk this turn finish going under before they're cleared away.
+        if (_ships.Any(s => s.IsSinking))
+            return;
+
         StartTurn();
     }
 
     private void StartTurn()
     {
         _ships.RemoveAll(s => s.IsSunk);
-        if (_ships.Count < 2)
-        {
-            Phase = TurnPhase.GameOver;
-            foreach (var ship in _ships)
-            {
-                ship.PlannedOrders.Clear();
-                ship.IsActive = false;
-            }
-            return;
-        }
-
-        TurnNumber++;
-        Phase = TurnPhase.Planning;
-        _activeIndex = 0;
-
         foreach (var ship in _ships)
         {
             ship.PlannedOrders.Clear();
@@ -195,7 +186,29 @@ public class TurnManager
             ship.IsActive = false;
         }
 
+        bool playerAfloat = _ships.Any(s => s.Side == Side.Player);
+        bool enemyAfloat = _ships.Any(s => s.Side == Side.Enemy);
+        if (!playerAfloat || !enemyAfloat)
+        {
+            Phase = TurnPhase.GameOver;
+            Winner = playerAfloat ? Side.Player : enemyAfloat ? Side.Enemy : null;
+            return;
+        }
+
+        TurnNumber++;
+        Phase = TurnPhase.Planning;
+        _activeIndex = NextPlayerShipIndex(0);
         _ships[_activeIndex].IsActive = true;
+    }
+
+    // Index of the first ship from the given one on that takes orders from the player; Count if there are none.
+    // Enemy ships have no orders yet, so they just sit where they are.
+    private int NextPlayerShipIndex(int from)
+    {
+        int index = from;
+        while (index < _ships.Count && !_ships[index].IsPlayerControlled)
+            index++;
+        return index;
     }
 
     // Ships resolve in planning order, so a ship that acts earlier will already sit on its planned
