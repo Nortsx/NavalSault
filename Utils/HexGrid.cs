@@ -18,6 +18,8 @@ public class HexGrid
 
     public float HexRadius { get; }
     public float TileY { get; }
+    // World distance from the map center to the furthest tile center.
+    public float WorldRadius { get; }
 
     public HexGrid(GraphicsDevice graphicsDevice, float hexRadius, int gridRadius, float tileY, Color color, Color highlightColor)
     {
@@ -34,6 +36,9 @@ public class HexGrid
             for (int r = rMin; r <= rMax; r++)
                 _tiles[(q, r)] = AxialToWorld((q, r));
         }
+
+        // The corner tiles of a hex-shaped map are the furthest out.
+        WorldRadius = hexRadius * (float)Math.Sqrt(3) * gridRadius;
     }
 
     // Center of a tile, whether it's on the map or not.

@@ -44,24 +44,26 @@ public class TurnManager
         StartTurn();
     }
 
-    // Path the active ship would sail to reach the tile, starting from where its planned orders leave it.
-    // Null if it's not planning time, the tile can't be reached, or the ship lacks the turn points.
-    public List<(int Q, int R)> PlanMove((int Q, int R) target)
+    // Path of anchor tiles the active ship would sail to bring its anchor onto the tile, starting from where
+    // its planned orders leave it, optionally arriving with the given facing. Null if it's not planning time,
+    // the tile can't be reached, or the ship lacks the turn points.
+    public List<(int Q, int R)> PlanMove((int Q, int R) target, HexDirection? endFacing = null)
     {
         var ship = ActiveShip;
         if (ship == null)
             return null;
 
-        var path = _pathfinder.FindPath(ship.PlannedTile, target, ship.PlannedFacing, tile => IsOccupied(tile, ship));
+        var occupied = OccupiedTiles(ship);
+        var path = _pathfinder.FindPath(ship.PlannedTile, target, ship.PlannedFacing, ship.Footprint, occupied.Contains, endFacing);
         if (path == null || path.Count < 2 || path.Count - 1 > ship.TurnPoints)
             return null;
 
         return path;
     }
 
-    public bool TryAddMove((int Q, int R) target)
+    public bool TryAddMove((int Q, int R) target, HexDirection? endFacing = null)
     {
-        var path = PlanMove(target);
+        var path = PlanMove(target, endFacing);
         return path != null && TryAddOrder(new MoveOrder(ActiveShip, path, _grid));
     }
 
@@ -74,7 +76,7 @@ public class TurnManager
             return null;
 
         int distance = HexGrid.Distance(ship.PlannedTile, target);
-        if (distance < 1 || distance > ship.Weapon.Range)
+        if (distance < 1 || distance > ship.Weapon.Range || ship.PlannedTiles.Contains(target))
             return null;
 
         return new ShootOrder(ship, ship.Weapon, ship.PlannedTile, ship.PlannedFacing, target, _ships, _random);
@@ -197,9 +199,10 @@ public class TurnManager
     }
 
     // Ships resolve in planning order, so a ship that acts earlier will already sit on its planned
-    // end tile, while one that acts later is still on its current tile.
-    private bool IsOccupied((int Q, int R) tile, Ship planningShip)
+    // end tiles, while one that acts later is still on its current tiles.
+    private HashSet<(int Q, int R)> OccupiedTiles(Ship planningShip)
     {
+        var occupied = new HashSet<(int Q, int R)>();
         int planningIndex = _ships.IndexOf(planningShip);
         for (int i = 0; i < _ships.Count; i++)
         {
@@ -207,11 +210,9 @@ public class TurnManager
                 continue;
 
             var other = _ships[i];
-            var occupiedTile = i < planningIndex ? other.PlannedTile : other.Tile;
-            if (occupiedTile == tile)
-                return true;
+            occupied.UnionWith(i < planningIndex ? other.PlannedTiles : other.Tiles);
         }
 
-        return false;
+        return occupied;
     }
 }

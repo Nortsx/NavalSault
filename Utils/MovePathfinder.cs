@@ -17,16 +17,27 @@ public class MovePathfinder
         _grid = grid;
     }
 
-    // Returns tiles from start to goal (both included), or null if the goal can't be reached.
+    // Returns the anchor tiles from start to goal (both included), or null if the goal can't be reached.
     // Among the shortest routes, picks the one with the least total turning (60° = 1), counting
     // the first step's turn away from facing. That makes the ship go straight first and turn afterwards.
+    // A ship turns at most 60° per tile entered and never reverses. Before stepping in a new direction it
+    // pivots on its anchor, so its whole footprint must fit both pivoted in place and on the next tile.
     // isOccupied marks extra tiles to avoid on top of the grid's own blocked tiles, e.g. other ships.
+    // endFacing, if given, is the direction the ship must face on the goal.
     public List<(int Q, int R)> FindPath((int Q, int R) start, (int Q, int R) goal, HexDirection facing,
-        Func<(int Q, int R), bool> isOccupied = null)
+        HexFootprint footprint, Func<(int Q, int R), bool> isOccupied = null, HexDirection? endFacing = null)
     {
-        bool CanEnter((int Q, int R) tile) => _grid.IsPassable(tile) && (isOccupied == null || !isOccupied(tile));
+        bool Fits((int Q, int R) anchor, HexDirection direction)
+        {
+            foreach (var tile in footprint.Tiles(anchor, direction))
+            {
+                if (!_grid.IsPassable(tile) || (isOccupied != null && isOccupied(tile)))
+                    return false;
+            }
+            return true;
+        }
 
-        if (!CanEnter(goal))
+        if (endFacing.HasValue ? !Fits(goal, endFacing.Value) : !GoalFitsAnyFacing(goal, Fits))
             return null;
 
         // Search state is tile + direction the ship faces on it, since turning has a cost.
@@ -41,14 +52,14 @@ public class MovePathfinder
             if (stateCost > cost[state])
                 continue;
 
-            if (state.Tile == goal)
+            if (state.Tile == goal && (!endFacing.HasValue || state.Facing == endFacing.Value))
                 return BuildPath(cameFrom, state);
 
-            for (int i = 0; i < HexDirections.Count; i++)
+            for (int turn = -1; turn <= 1; turn++)
             {
-                var direction = (HexDirection)i;
+                var direction = HexDirections.Turn(state.Facing, turn);
                 var next = (Tile: HexDirections.Neighbor(state.Tile, direction), Facing: direction);
-                if (!CanEnter(next.Tile))
+                if (!Fits(next.Tile, direction) || (turn != 0 && !Fits(state.Tile, direction)))
                     continue;
 
                 int nextCost = stateCost + StepCost + HexDirections.TurnSize(state.Facing, direction);
@@ -62,6 +73,16 @@ public class MovePathfinder
         }
 
         return null;
+    }
+
+    private static bool GoalFitsAnyFacing((int Q, int R) goal, Func<(int Q, int R), HexDirection, bool> fits)
+    {
+        for (int i = 0; i < HexDirections.Count; i++)
+        {
+            if (fits(goal, (HexDirection)i))
+                return true;
+        }
+        return false;
     }
 
     private static List<(int Q, int R)> BuildPath(

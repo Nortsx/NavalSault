@@ -45,6 +45,10 @@ public class Game1 : Game
     private KeyboardState _previousKeyboardState;
     private (int Q, int R)? _hoveredTile;
     private List<(int Q, int R)> _previewPath;
+    // Direction the active ship would face at the end of the previewed path.
+    private HexDirection _previewFacing;
+    // End facing picked with Q/E for the next move; null lets the pathfinder choose.
+    private HexDirection? _desiredFacing;
     // What a click on a tile does for the active ship.
     private ActionMode _mode;
     private ShootOrder _previewShot;
@@ -63,8 +67,8 @@ public class Game1 : Game
     public Game1()
     {
         _graphics = new GraphicsDeviceManager(this);
-        _graphics.PreferredBackBufferWidth = 1280;
-        _graphics.PreferredBackBufferHeight = 720;
+        _graphics.PreferredBackBufferWidth = 1920;
+        _graphics.PreferredBackBufferHeight = 1080;
         _graphics.PreferredDepthStencilFormat = DepthFormat.Depth24Stencil8;
         _graphics.GraphicsProfile = GraphicsProfile.Reach;
         Content.RootDirectory = "Content";
@@ -98,6 +102,7 @@ public class Game1 : Game
         _water = new WaterRenderer(GraphicsDevice, Content.Load<Effect>("Water"), SkyColor, LightDirection);
         _hexGrid = new HexGrid(GraphicsDevice, hexRadius: 8f, gridRadius: 8, tileY: 1.3f, color: new Color(0, 255, 128), highlightColor: new Color(150, 255, 190));
         _overlay = new HexOverlay(GraphicsDevice, _hexGrid.HexRadius);
+        _camera.SetPanBounds(Vector3.Zero, _hexGrid.WorldRadius);
 
         // Test island: two columns of three tiles, one tile of open water ahead of ship A.
         _island = new Island(GraphicsDevice, _hexGrid.HexRadius,
@@ -108,8 +113,8 @@ public class Game1 : Game
 
         var ships = new[]
         {
-            CreateShip("Ship A", (0, 0), new Color(200, 60, 40), initiative: 5),
-            CreateShip("Ship B", (3, -1), new Color(60, 90, 200), initiative: 3)
+            CreateShip("Ship A", HexFootprint.Line1x3, (0, 0), new Color(200, 60, 40), initiative: 5),
+            CreateShip("Ship B", HexFootprint.Wide2x3, (3, -1), new Color(60, 90, 200), initiative: 3)
         };
         _turns = new TurnManager(ships, _hexGrid, new MovePathfinder(_hexGrid));
 
@@ -126,10 +131,9 @@ public class Game1 : Game
         _buttons = [_moveButton, _shootButton, _endTurnButton];
     }
 
-    private Ship CreateShip(string name, (int Q, int R) tile, Color color, int initiative)
+    private Ship CreateShip(string name, HexFootprint footprint, (int Q, int R) tile, Color color, int initiative)
     {
-        _hexGrid.TryGetTilePosition(tile.Q, tile.R, out var position);
-        return new Ship(GraphicsDevice, name, tile, position, size: 6f, baseColor: color, activeColor: ActiveShipColor,
+        return new Ship(GraphicsDevice, _hexGrid, name, footprint, tile, baseColor: color, activeColor: ActiveShipColor,
             facing: HexDirection.North, initiative: initiative, maxTurnPoints: 5, maxHp: 30,
             weapon: new Weapon("Cannon", damage: 10, range: 6, shotCost: 3, spreadStep: 3));
     }
@@ -141,7 +145,8 @@ public class Game1 : Game
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
             Exit();
 
-        _camera.Update(gameTime, keyboard);
+        var mouse = Mouse.GetState();
+        _camera.Update(gameTime, keyboard, mouse.ScrollWheelValue - _previousMouseState.ScrollWheelValue);
 
         if (WasPressed(keyboard, Keys.M))
             _mode = ActionMode.Move;
@@ -150,15 +155,24 @@ public class Game1 : Game
         if (WasPressed(keyboard, Keys.Enter))
             EndActiveShipTurn();
         if (WasPressed(keyboard, Keys.Back))
+        {
             _turns.UndoLastOrder();
+            _desiredFacing = null;
+        }
+        if (WasPressed(keyboard, Keys.Q))
+            RotateDesiredFacing(-1);
+        if (WasPressed(keyboard, Keys.E))
+            RotateDesiredFacing(1);
         _previousKeyboardState = keyboard;
 
-        var mouse = Mouse.GetState();
         var mousePosition = new Vector2(mouse.X, mouse.Y);
         bool leftClicked = mouse.LeftButton == ButtonState.Pressed && _previousMouseState.LeftButton == ButtonState.Released;
 
         if (mouse.RightButton == ButtonState.Pressed && _previousMouseState.RightButton == ButtonState.Released)
+        {
             _mode = ActionMode.Move;
+            _desiredFacing = null;
+        }
 
         UpdateButtons();
         bool overButton = ButtonsVisible && Array.Exists(_buttons, b => b.Contains(mouse.Position));
@@ -171,6 +185,8 @@ public class Game1 : Game
             EndActiveShipTurn();
         // Switching mode by key or click may have picked one the ship can't use.
         UpdateButtons();
+        if (_mode != ActionMode.Move)
+            _desiredFacing = null;
 
         // The buttons sit on top of the map, so the map ignores the mouse while it's over them.
         if (overButton)
@@ -187,7 +203,10 @@ public class Game1 : Game
         if (leftClicked && !overButton && _hoveredTile.HasValue)
         {
             if (_mode == ActionMode.Move)
-                _turns.TryAddMove(_hoveredTile.Value);
+            {
+                if (_turns.TryAddMove(_hoveredTile.Value, _desiredFacing))
+                    _desiredFacing = null;
+            }
             else if (_turns.TryAddShot(_hoveredTile.Value))
                 _mode = ActionMode.Move;
         }
@@ -208,6 +227,19 @@ public class Game1 : Game
     {
         _turns.FinishActiveShip();
         _mode = ActionMode.Move;
+        _desiredFacing = null;
+    }
+
+    // Turns the end facing for the next move by 60° steps, starting from the facing the
+    // previewed path would end with, or from where the ship faces if nothing is previewed.
+    private void RotateDesiredFacing(int steps)
+    {
+        var ship = _turns.ActiveShip;
+        if (ship == null || _mode != ActionMode.Move)
+            return;
+
+        var current = _desiredFacing ?? (_previewPath != null ? _previewFacing : ship.PlannedFacing);
+        _desiredFacing = HexDirections.Turn(current, steps);
     }
 
     // Buttons only matter while a ship is taking orders.
@@ -260,9 +292,12 @@ public class Game1 : Game
             return;
         }
 
-        _previewPath = _turns.PlanMove(tile);
+        _previewPath = _turns.PlanMove(tile, _desiredFacing);
         if (_previewPath != null)
+        {
             _hoveredTile = tile;
+            _previewFacing = HexDirections.Between(_previewPath[^2], _previewPath[^1]);
+        }
     }
 
     private Vector3? PickPlane(Vector2 mousePosition, float planeY)
@@ -332,7 +367,7 @@ public class Game1 : Game
         _spriteBatch.Begin();
         _spriteBatch.DrawString(_font, $"FPS: {_fps:0}", new Vector2(10, 10), Color.White);
         _spriteBatch.DrawString(_font, status, new Vector2(10, 30), Color.White);
-        _spriteBatch.DrawString(_font, "M: move   F: shoot   Right click: back to move   Backspace: undo   Enter: finish ship",
+        _spriteBatch.DrawString(_font, "M: move   F: shoot   Q/E: end facing   Right click: back to move   Wheel: zoom   Backspace: undo   Enter: finish ship",
             new Vector2(10, 50), Color.White);
 
         if (ButtonsVisible)
@@ -346,7 +381,7 @@ public class Game1 : Game
         foreach (var ship in _turns.Ships)
         {
             string weapon = ship.Weapon == null ? "" : $"  |  {ship.Weapon.Name}: range {ship.Weapon.Range}, {ship.Weapon.ShotCost} TP";
-            _spriteBatch.DrawString(_font, $"{ship.Name}  HP {ship.Hp}/{ship.MaxHp}{weapon}", new Vector2(10, y), Color.White);
+            _spriteBatch.DrawString(_font, $"{ship.Name} ({ship.Footprint.Name})  HP {ship.Hp}/{ship.MaxHp}{weapon}", new Vector2(10, y), Color.White);
             y += 20;
         }
         _spriteBatch.End();
@@ -379,8 +414,16 @@ public class Game1 : Game
             }
         }
 
+        // The tiles the active ship will cover once its planned orders are done.
+        if (_turns.ActiveShip is { } active)
+            _overlay.Draw(GraphicsDevice, _effect, _hexGrid, active.PlannedTiles, PlannedPathColor, fillAlpha: 0.08f);
+
         if (_previewPath != null)
+        {
             PathLine.Draw(GraphicsDevice, _effect, ToWorldPositions(_previewPath), PreviewPathColor);
+            _overlay.Draw(GraphicsDevice, _effect, _hexGrid,
+                _turns.ActiveShip.Footprint.Tiles(_previewPath[^1], _previewFacing), PreviewPathColor, fillAlpha: 0.25f);
+        }
         if (_previewShot != null)
             DrawShotPlan(_previewShot, PreviewShotColor, fillAlpha: 0.3f);
         if (_turns.ResolvingOrder is ShootOrder firing)

@@ -51,6 +51,22 @@ public static class HexDirections
         return Math.Min(diff, Count - diff);
     }
 
+    // Direction after turning the given number of 60° steps clockwise (negative = anticlockwise).
+    public static HexDirection Turn(HexDirection direction, int steps)
+    {
+        return (HexDirection)((((int)direction + steps) % Count + Count) % Count);
+    }
+
+    // Rotates an offset given for a North-facing shape so it matches the direction, clockwise around (0, 0).
+    public static (int Q, int R) Rotate((int Q, int R) offset, HexDirection direction)
+    {
+        // Cube coordinates: x = Q, z = R, y = -x - z. One clockwise 60° step maps (x, y, z) to (-z, -x, -y).
+        int x = offset.Q, z = offset.R, y = -x - z;
+        for (int i = 0; i < (int)direction; i++)
+            (x, y, z) = (-z, -x, -y);
+        return (x, z);
+    }
+
     // Rotation around Y that turns a model facing -Z towards the direction.
     public static float ToYaw(HexDirection direction)
     {

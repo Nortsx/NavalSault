@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using NavalSault.GameLogic.Orders;
@@ -22,7 +23,9 @@ public class Ship
     private readonly Queue<((int Q, int R) Tile, Vector3 Position, HexDirection Facing)> _waypoints = new();
 
     public string Name { get; }
-    // Tile the ship stands on; the authoritative position for game rules. Updates as each waypoint is reached.
+    // Tiles the hull covers around its anchor tile.
+    public HexFootprint Footprint { get; }
+    // Anchor tile the ship stands on; the authoritative position for game rules. Updates as each waypoint is reached.
     public (int Q, int R) Tile { get; private set; }
     // World position for drawing; slides between tiles while moving.
     public Vector3 Position { get; private set; }
@@ -48,11 +51,17 @@ public class Ship
     public (int Q, int R) PlannedTile => PlannedOrders.Count > 0 ? PlannedOrders[^1].EndTile : Tile;
     public HexDirection PlannedFacing => PlannedOrders.Count > 0 ? PlannedOrders[^1].EndFacing : Facing;
 
-    public Ship(GraphicsDevice graphicsDevice, string name, (int Q, int R) tile, Vector3 position, float size,
+    // Every tile the hull covers now, and once all planned orders are carried out.
+    public IEnumerable<(int Q, int R)> Tiles => Footprint.Tiles(Tile, Facing);
+    public IEnumerable<(int Q, int R)> PlannedTiles => Footprint.Tiles(PlannedTile, PlannedFacing);
+
+    public Ship(GraphicsDevice graphicsDevice, HexGrid grid, string name, HexFootprint footprint, (int Q, int R) tile,
         Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, int maxHp, Weapon weapon)
     {
         Name = name;
+        Footprint = footprint;
         Tile = tile;
+        grid.TryGetTilePosition(tile.Q, tile.R, out var position);
         Position = position;
         Facing = facing;
         Initiative = initiative;
@@ -64,19 +73,31 @@ public class Ship
         _baseColor = baseColor;
         _activeColor = activeColor;
 
-        // Hull is longer along -Z (the bow) than it is wide, so the facing is visible.
-        float hw = size * 0.3f;
-        float hl = size * 0.7f;
-        float height = size * 0.6f;
+        // The hull is a box over the footprint's tiles in model space (bow along -Z), around the anchor at the origin,
+        // so it turns with the ship exactly like the footprint does.
+        Vector3 anchorWorld = grid.AxialToWorld((0, 0));
+        Vector3 min = new Vector3(float.MaxValue), max = new Vector3(float.MinValue);
+        foreach (var offset in footprint.Offsets)
+        {
+            Vector3 local = grid.AxialToWorld(offset) - anchorWorld;
+            min = Vector3.Min(min, local);
+            max = Vector3.Max(max, local);
+        }
 
-        Vector3 p000 = new Vector3(-hw, 0f, -hl);
-        Vector3 p100 = new Vector3(hw, 0f, -hl);
-        Vector3 p110 = new Vector3(hw, 0f, hl);
-        Vector3 p010 = new Vector3(-hw, 0f, hl);
-        Vector3 p001 = new Vector3(-hw, height, -hl);
-        Vector3 p101 = new Vector3(hw, height, -hl);
-        Vector3 p111 = new Vector3(hw, height, hl);
-        Vector3 p011 = new Vector3(-hw, height, hl);
+        float hw = (max.X - min.X) / 2f + grid.HexRadius * 0.45f;
+        float hl = (max.Z - min.Z) / 2f + grid.HexRadius * (float)Math.Sqrt(3) * 0.4f;
+        float height = grid.HexRadius * 0.45f;
+        float cx = (min.X + max.X) / 2f;
+        float cz = (min.Z + max.Z) / 2f;
+
+        Vector3 p000 = new Vector3(cx - hw, 0f, cz - hl);
+        Vector3 p100 = new Vector3(cx + hw, 0f, cz - hl);
+        Vector3 p110 = new Vector3(cx + hw, 0f, cz + hl);
+        Vector3 p010 = new Vector3(cx - hw, 0f, cz + hl);
+        Vector3 p001 = new Vector3(cx - hw, height, cz - hl);
+        Vector3 p101 = new Vector3(cx + hw, height, cz - hl);
+        Vector3 p111 = new Vector3(cx + hw, height, cz + hl);
+        Vector3 p011 = new Vector3(cx - hw, height, cz + hl);
 
         var vertices = new List<VertexPositionNormalTexture>();
         var indices = new List<ushort>();
@@ -115,10 +136,10 @@ public class Ship
         indices.Add((ushort)(baseIndex + 3));
     }
 
-    // True if the ship sits on the tile and can be hit there.
+    // True if any part of the hull sits on the tile, so it can be hit there.
     public bool Occupies((int Q, int R) tile)
     {
-        return !IsSunk && Tile == tile;
+        return !IsSunk && Tiles.Contains(tile);
     }
 
     public void TakeDamage(int damage)
