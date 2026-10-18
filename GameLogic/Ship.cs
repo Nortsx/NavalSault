@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using NavalSault.GameLogic.AI;
 using NavalSault.GameLogic.Orders;
 using NavalSault.Utils;
 
@@ -31,7 +32,9 @@ public class Ship
 
     public string Name { get; }
     public Side Side { get; }
-    public bool IsPlayerControlled => Side == Side.Player;
+    // Plans the orders of a ship the player doesn't command; null for player ships. Can be swapped mid-battle.
+    public ShipBehaviour Behaviour { get; set; }
+    public bool IsPlayerControlled => Behaviour == null;
     // Tiles the hull covers around its anchor tile.
     public HexFootprint Footprint { get; }
     // Anchor tile the ship stands on; the authoritative position for game rules. Updates as each waypoint is reached.

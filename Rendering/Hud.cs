@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NavalSault.GameLogic;
+using NavalSault.GameLogic.Scripting;
 using NavalSault.Input;
 using NavalSault.Utils;
 
@@ -23,18 +24,20 @@ public class Hud
     private readonly Texture2D _pixel;
     private readonly TurnManager _turns;
     private readonly PlayerController _controller;
+    private readonly ScriptContext _script;
 
     private int _frameCount;
     private double _fpsTimer;
     private double _fps;
 
-    public Hud(GraphicsDevice graphicsDevice, SpriteFont font, TurnManager turns, PlayerController controller)
+    public Hud(GraphicsDevice graphicsDevice, SpriteFont font, TurnManager turns, PlayerController controller, ScriptContext script)
     {
         _graphicsDevice = graphicsDevice;
         _spriteBatch = new SpriteBatch(graphicsDevice);
         _font = font;
         _turns = turns;
         _controller = controller;
+        _script = script;
         _pixel = new Texture2D(graphicsDevice, 1, 1);
         _pixel.SetData([Color.White]);
     }
@@ -57,10 +60,10 @@ public class Hud
             TurnPhase.Resolving => $"Turn {_turns.TurnNumber}  |  Resolving",
             _ => _turns.Winner switch
             {
-                Side.Player => "Victory  |  Every enemy ship sunk",
-                Side.Enemy => "Defeat  |  Your fleet was sunk",
-                _ => "Game over  |  Every ship sank"
-            }
+                Side.Player => "Victory",
+                Side.Enemy => "Defeat",
+                _ => "Game over"
+            } + $"  |  {_turns.GameOverReason}"
         };
 
         _spriteBatch.Begin();
@@ -69,6 +72,14 @@ public class Hud
         _spriteBatch.DrawString(_font, status, new Vector2(10, 30), Color.White);
         _spriteBatch.DrawString(_font, "M: move   F: shoot   Q/E: end facing   Right click: back to move   Wheel: zoom   Backspace: undo   Enter: finish ship",
             new Vector2(10, 50), Color.White);
+
+        if (_script.Message is { } message)
+        {
+            var size = _font.MeasureString(message);
+            var position = new Vector2((_graphicsDevice.Viewport.Width - size.X) / 2f, 30);
+            _spriteBatch.Draw(_pixel, new Rectangle((int)position.X - 12, (int)position.Y - 6, (int)size.X + 24, (int)size.Y + 12), Color.Black * 0.6f);
+            _spriteBatch.DrawString(_font, message, position, Color.White);
+        }
 
         if (_controller.ButtonsVisible)
         {
@@ -81,7 +92,7 @@ public class Hud
         foreach (var ship in _turns.Ships)
         {
             string weapon = ship.Weapon == null ? "" : $"  |  {ship.Weapon.Name}: range {ship.Weapon.Range}, {ship.Weapon.ShotCost} TP";
-            string side = ship.IsPlayerControlled ? "" : " [enemy]";
+            string side = ship.Side == Side.Player ? "" : " [enemy]";
             string hp = ship.IsSunk ? "SUNK" : $"HP {ship.Hp}/{ship.MaxHp}";
             _spriteBatch.DrawString(_font, $"{ship.Name}{side} ({ship.Footprint.Name})  {hp}{weapon}", new Vector2(10, y), Color.White);
             y += 20;
@@ -108,7 +119,7 @@ public class Hud
             int filled = (int)Math.Ceiling((width - 2 * border) * (float)ship.Hp / ship.MaxHp);
             _spriteBatch.Draw(_pixel, new Rectangle(left, top, width, height), HpBackColor);
             _spriteBatch.Draw(_pixel, new Rectangle(left + border, top + border, filled, height - 2 * border),
-                ship.IsPlayerControlled ? PlayerHpColor : EnemyHpColor);
+                ship.Side == Side.Player ? PlayerHpColor : EnemyHpColor);
         }
     }
 }

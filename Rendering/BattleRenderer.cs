@@ -78,6 +78,10 @@ public class BattleRenderer
 
         foreach (var ship in _turns.Ships)
         {
+            // AI ships keep their plans to themselves until the turn resolves.
+            if (!ship.IsPlayerControlled && _turns.Phase == TurnPhase.Planning)
+                continue;
+
             foreach (var order in ship.PlannedOrders)
             {
                 if (order is MoveOrder move)

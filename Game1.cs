@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using NavalSault.GameLogic;
+using NavalSault.GameLogic.Scripting;
 using NavalSault.Input;
 using NavalSault.Rendering;
 using NavalSault.Utils;
@@ -16,8 +17,8 @@ public class Game1 : Game
     private GraphicsDeviceManager _graphics;
     private Camera _camera;
     private WaterRenderer _water;
-    private HexGrid _hexGrid;
     private TurnManager _turns;
+    private ScriptRunner _script;
     private PlayerController _controller;
     private BattleRenderer _battleRenderer;
     private Hud _hud;
@@ -44,15 +45,17 @@ public class Game1 : Game
     protected override void LoadContent()
     {
         _water = new WaterRenderer(GraphicsDevice, Content.Load<Effect>("Water"), SkyColor, LightDirection);
-        _hexGrid = new HexGrid(GraphicsDevice, hexRadius: 8f, gridRadius: 8, tileY: 1.3f, color: new Color(0, 255, 128), highlightColor: new Color(150, 255, 190));
-        _camera.SetPanBounds(Vector3.Zero, _hexGrid.WorldRadius);
+        var scenario = Scenario.Skirmish(GraphicsDevice);
+        var grid = scenario.Grid;
+        _camera.SetPanBounds(Vector3.Zero, grid.WorldRadius);
 
-        var scenario = Scenario.Skirmish(GraphicsDevice, _hexGrid);
-        _turns = new TurnManager(scenario.Ships, _hexGrid, new MovePathfinder(_hexGrid));
+        _turns = new TurnManager(scenario.Ships, grid, new MovePathfinder(grid), scenario.VictoryConditions);
+        _script = new ScriptRunner(_turns, scenario.Events);
 
-        _controller = new PlayerController(GraphicsDevice, _camera, _hexGrid, _turns);
-        _battleRenderer = new BattleRenderer(GraphicsDevice, LightDirection, _hexGrid, scenario.Island, _turns, _controller);
-        _hud = new Hud(GraphicsDevice, Content.Load<SpriteFont>("DefaultFont"), _turns, _controller);
+        _controller = new PlayerController(GraphicsDevice, _camera, grid, _turns);
+        _battleRenderer = new BattleRenderer(GraphicsDevice, LightDirection, grid, scenario.Island, _turns, _controller);
+        _hud = new Hud(GraphicsDevice, Content.Load<SpriteFont>("DefaultFont"), _turns, _controller, _script.Context);
+        _turns.Start();
         _previousScrollWheel = Mouse.GetState().ScrollWheelValue;
     }
 
@@ -69,6 +72,7 @@ public class Game1 : Game
 
         _controller.Update(keyboard, mouse);
         _turns.Update(gameTime);
+        _script.Update(gameTime);
 
         base.Update(gameTime);
     }

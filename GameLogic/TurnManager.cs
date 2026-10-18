@@ -3,17 +3,19 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using NavalSault.GameLogic.Orders;
+using NavalSault.GameLogic.Rules;
 using NavalSault.Utils;
 
 namespace NavalSault.GameLogic;
 
 public enum TurnPhase
 {
-    // Player ships take orders one at a time, highest Initiative first.
+    // Ships take orders one at a time, highest Initiative first, whichever side they're on.
+    // AI ships plan on the spot when their slot comes up; the turn waits on player ships.
     Planning,
     // Orders are carried out ship by ship in the same order.
     Resolving,
-    // One side, or both, has no ships left afloat.
+    // A victory condition was met, or a script ended the battle.
     GameOver
 }
 
@@ -23,7 +25,10 @@ public class TurnManager
     private readonly List<Ship> _ships;
     private readonly HexGrid _grid;
     private readonly MovePathfinder _pathfinder;
+    private readonly IReadOnlyList<VictoryCondition> _victoryConditions;
     private readonly Random _random = new();
+    // Ships waiting to join the battle at the start of a turn.
+    private readonly List<Ship> _pendingShips = new();
 
     private int _activeIndex;
     private int _resolvingShipIndex;
@@ -35,15 +40,57 @@ public class TurnManager
     public Ship ActiveShip => Phase == TurnPhase.Planning ? _ships[_activeIndex] : null;
     // The order being carried out right now while resolving, or null.
     public Order ResolvingOrder { get; private set; }
-    // The side still afloat once the game is over; null while playing, or if both sides sank.
+    // The side that won once the game is over; null while playing, or if nobody won.
     public Side? Winner { get; private set; }
+    // Why the battle ended, for the HUD; null while playing.
+    public string GameOverReason { get; private set; }
 
-    public TurnManager(IEnumerable<Ship> ships, HexGrid grid, MovePathfinder pathfinder)
+    // Raised once a new turn has begun, before any ship plans, so changes made by handlers apply to this turn.
+    public event Action<int> TurnStarted;
+    // Raised after each order has been carried out.
+    public event Action<Order> OrderResolved;
+    // Raised when a resolved shot sinks a ship.
+    public event Action<Ship> ShipSunk;
+
+    public TurnManager(IEnumerable<Ship> ships, HexGrid grid, MovePathfinder pathfinder, IReadOnlyList<VictoryCondition> victoryConditions)
     {
         _ships = ships.OrderByDescending(s => s.Initiative).ToList();
         _grid = grid;
         _pathfinder = pathfinder;
+        _victoryConditions = victoryConditions;
+    }
+
+    // Starts the first turn. Separate from the constructor so listeners can subscribe to TurnStarted first.
+    public void Start()
+    {
         StartTurn();
+    }
+
+    // The ship with that name still afloat, or null.
+    public Ship FindShip(string name)
+    {
+        return _ships.Find(s => s.Name == name && !s.IsSunk);
+    }
+
+    // The ship joins the battle at the start of the next turn, or of the first turn its tiles are free.
+    public void AddShip(Ship ship)
+    {
+        _pendingShips.Add(ship);
+    }
+
+    // Ends the battle at once, even in the middle of a turn.
+    public void EndBattle(Side? winner, string reason)
+    {
+        if (Phase == TurnPhase.GameOver)
+            return;
+
+        if (Phase == TurnPhase.Planning)
+            _ships[_activeIndex].IsActive = false;
+
+        Phase = TurnPhase.GameOver;
+        Winner = winner;
+        GameOverReason = reason;
+        ResolvingOrder = null;
     }
 
     // Path of anchor tiles the active ship would sail to bring its anchor onto the tile, starting from where
@@ -112,25 +159,14 @@ public class TurnManager
         ship.TurnPoints += order.TurnPointCost;
     }
 
-    // The active ship is done taking orders; hand over to the next player ship, or resolve after the last.
+    // The active player ship is done taking orders; hand over to the next ship, or resolve after the last.
     public void FinishActiveShip()
     {
-        if (Phase != TurnPhase.Planning)
+        if (Phase != TurnPhase.Planning || !ActiveShip.IsPlayerControlled)
             return;
 
         _ships[_activeIndex].IsActive = false;
-        _activeIndex = NextPlayerShipIndex(_activeIndex + 1);
-
-        if (_activeIndex < _ships.Count)
-        {
-            _ships[_activeIndex].IsActive = true;
-            return;
-        }
-
-        Phase = TurnPhase.Resolving;
-        _resolvingShipIndex = 0;
-        _resolvingOrderIndex = 0;
-        ResolvingOrder = null;
+        AdvancePlanning(_activeIndex + 1);
     }
 
     public void Update(GameTime gameTime)
@@ -140,6 +176,28 @@ public class TurnManager
 
         if (Phase == TurnPhase.Resolving)
             Resolve(gameTime);
+    }
+
+    // Hands planning to the ships from the given index on, in turn order. AI ships plan their orders on the spot;
+    // stops at the first player ship, or starts resolving once every ship has planned.
+    private void AdvancePlanning(int from)
+    {
+        for (_activeIndex = from; _activeIndex < _ships.Count; _activeIndex++)
+        {
+            var ship = _ships[_activeIndex];
+            if (ship.IsPlayerControlled)
+            {
+                ship.IsActive = true;
+                return;
+            }
+
+            ship.Behaviour.PlanTurn(ship, this);
+        }
+
+        Phase = TurnPhase.Resolving;
+        _resolvingShipIndex = 0;
+        _resolvingOrderIndex = 0;
+        ResolvingOrder = null;
     }
 
     // Steps through every ship's orders in turn order, one at a time; starts the next turn when all are done.
@@ -165,8 +223,17 @@ public class TurnManager
             if (!ResolvingOrder.Update(gameTime))
                 return;
 
+            var order = ResolvingOrder;
             _resolvingOrderIndex++;
             ResolvingOrder = null;
+
+            if (order is ShootOrder { HitShip.IsSunk: true } shot)
+                ShipSunk?.Invoke(shot.HitShip);
+            OrderResolved?.Invoke(order);
+
+            // A handler may have ended the battle.
+            if (Phase != TurnPhase.Resolving)
+                return;
         }
 
         // Let ships sunk this turn finish going under before they're cleared away.
@@ -179,6 +246,7 @@ public class TurnManager
     private void StartTurn()
     {
         _ships.RemoveAll(s => s.IsSunk);
+        AddPendingShips();
         foreach (var ship in _ships)
         {
             ship.PlannedOrders.Clear();
@@ -186,29 +254,47 @@ public class TurnManager
             ship.IsActive = false;
         }
 
-        bool playerAfloat = _ships.Any(s => s.Side == Side.Player);
-        bool enemyAfloat = _ships.Any(s => s.Side == Side.Enemy);
-        if (!playerAfloat || !enemyAfloat)
+        foreach (var condition in _victoryConditions)
         {
-            Phase = TurnPhase.GameOver;
-            Winner = playerAfloat ? Side.Player : enemyAfloat ? Side.Enemy : null;
+            if (condition.TryGetResult(this, out var winner, out var reason))
+            {
+                EndBattle(winner, reason);
+                return;
+            }
+        }
+
+        // Without a condition that covers it, a battle with nobody left would otherwise go on forever.
+        if (_ships.Count == 0)
+        {
+            EndBattle(null, "Every ship sank");
             return;
         }
 
         TurnNumber++;
         Phase = TurnPhase.Planning;
-        _activeIndex = NextPlayerShipIndex(0);
-        _ships[_activeIndex].IsActive = true;
+        TurnStarted?.Invoke(TurnNumber);
+        if (Phase != TurnPhase.Planning)
+            return;
+
+        // Ships spawned by TurnStarted handlers act this turn already.
+        AddPendingShips();
+        AdvancePlanning(0);
     }
 
-    // Index of the first ship from the given one on that takes orders from the player; Count if there are none.
-    // Enemy ships have no orders yet, so they just sit where they are.
-    private int NextPlayerShipIndex(int from)
+    // Puts waiting ships into turn order, after any ships with the same Initiative.
+    // A ship whose tiles are blocked or taken keeps waiting.
+    private void AddPendingShips()
     {
-        int index = from;
-        while (index < _ships.Count && !_ships[index].IsPlayerControlled)
-            index++;
-        return index;
+        for (int i = 0; i < _pendingShips.Count; i++)
+        {
+            var ship = _pendingShips[i];
+            if (!ship.Tiles.All(t => _grid.IsPassable(t) && !_ships.Any(s => s.Occupies(t))))
+                continue;
+
+            int index = _ships.FindIndex(s => s.Initiative < ship.Initiative);
+            _ships.Insert(index < 0 ? _ships.Count : index, ship);
+            _pendingShips.RemoveAt(i--);
+        }
     }
 
     // Ships resolve in planning order, so a ship that acts earlier will already sit on its planned
