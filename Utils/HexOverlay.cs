@@ -20,7 +20,7 @@ public class HexOverlay
     }
 
     public void Draw(GraphicsDevice graphicsDevice, BasicEffect effect, HexGrid grid, IEnumerable<(int Q, int R)> tiles,
-        Color color, float fillAlpha)
+        Color color, float fillAlpha, bool outline = true)
     {
         var previousBlendState = graphicsDevice.BlendState;
         var previousDepthState = graphicsDevice.DepthStencilState;
@@ -40,6 +40,9 @@ public class HexOverlay
 
             effect.Alpha = fillAlpha;
             _fillMesh.Draw(graphicsDevice, effect);
+
+            if (!outline)
+                continue;
 
             effect.Alpha = 1f;
             _outlineMesh.Draw(graphicsDevice, effect);

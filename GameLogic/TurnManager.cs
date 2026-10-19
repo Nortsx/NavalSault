@@ -35,6 +35,8 @@ public class TurnManager
     private int _resolvingOrderIndex;
 
     public IReadOnlyList<Ship> Ships => _ships;
+    // What each side sees; kept up to date as ships move.
+    public FogOfWar Vision { get; } = new();
     public int TurnNumber { get; private set; }
     public TurnPhase Phase { get; private set; }
     public Ship ActiveShip => Phase == TurnPhase.Planning ? _ships[_activeIndex] : null;
@@ -176,6 +178,8 @@ public class TurnManager
 
         if (Phase == TurnPhase.Resolving)
             Resolve(gameTime);
+
+        Vision.Update(_ships);
     }
 
     // Hands planning to the ships from the given index on, in turn order. AI ships plan their orders on the spot;
@@ -278,6 +282,8 @@ public class TurnManager
 
         // Ships spawned by TurnStarted handlers act this turn already.
         AddPendingShips();
+        // AI ships plan on what their side sees now, ships that just joined included.
+        Vision.Update(_ships);
         AdvancePlanning(0);
     }
 

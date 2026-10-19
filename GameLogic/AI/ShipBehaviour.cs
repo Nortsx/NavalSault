@@ -12,9 +12,10 @@ public abstract class ShipBehaviour
     // the player's clicks go through, so every rule applies; the turn manager moves on once this returns.
     public abstract void PlanTurn(Ship ship, TurnManager turns);
 
+    // Opposing ships afloat that the ship's side can see; the AI knows nothing about the rest.
     protected static IEnumerable<Ship> Opponents(Ship ship, TurnManager turns)
     {
-        return turns.Ships.Where(s => s.Side != ship.Side && !s.IsSunk);
+        return turns.Ships.Where(s => s.Side != ship.Side && !s.IsSunk && turns.Vision.CanSee(ship.Side, s));
     }
 
     // Tiles from the tile to the nearest part of the other ship's hull.

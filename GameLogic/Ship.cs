@@ -35,6 +35,8 @@ public class Ship
     // Plans the orders of a ship the player doesn't command; null for player ships. Can be swapped mid-battle.
     public ShipBehaviour Behaviour { get; set; }
     public bool IsPlayerControlled => Behaviour == null;
+    // Tiles the ship sees around every tile of its hull.
+    public int ViewRadius { get; }
     // Tiles the hull covers around its anchor tile.
     public HexFootprint Footprint { get; }
     // Anchor tile the ship stands on; the authoritative position for game rules. Updates as each waypoint is reached.
@@ -71,7 +73,7 @@ public class Ship
     public IEnumerable<(int Q, int R)> PlannedTiles => Footprint.Tiles(PlannedTile, PlannedFacing);
 
     public Ship(GraphicsDevice graphicsDevice, HexGrid grid, string name, Side side, HexFootprint footprint, (int Q, int R) tile,
-        Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, int maxHp, Weapon weapon)
+        Color baseColor, Color activeColor, HexDirection facing, int initiative, int maxTurnPoints, int maxHp, int viewRadius, Weapon weapon)
     {
         Name = name;
         Side = side;
@@ -84,6 +86,7 @@ public class Ship
         MaxTurnPoints = maxTurnPoints;
         TurnPoints = maxTurnPoints;
         Weapon = weapon;
+        ViewRadius = viewRadius;
         MaxHp = maxHp;
         Hp = maxHp;
         _baseColor = baseColor;

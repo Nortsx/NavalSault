@@ -41,8 +41,8 @@ public class Scenario
     // The enemy loses patience on turn 4, or once it sinks a player ship, and reinforcements arrive on turn 5.
     public static Scenario Skirmish(GraphicsDevice graphicsDevice)
     {
-        // Eight tiles out from the center; the positions below are laid out for this radius.
-        var grid = CreateGrid(graphicsDevice, gridRadius: 8);
+        // Fourteen tiles out from the center, room to manoeuvre with long-range guns.
+        var grid = CreateGrid(graphicsDevice, gridRadius: 14);
 
         // Two columns of three tiles, one tile of open water ahead of Ship A.
         var island = new Island(graphicsDevice, grid.HexRadius,
@@ -51,7 +51,7 @@ public class Scenario
         foreach (var tile in island.Tiles)
             grid.SetBlocked(tile, true);
 
-        // The enemy waits behind the island, bow towards it, just out of reach of Ship A's guns.
+        // The enemy waits behind the island, bow towards it, just out of Ship A's sight but well within its guns' range.
         var enemyPost = (0, -7);
         var enemy = CreateShip(graphicsDevice, grid, "Enemy", Side.Enemy, HexFootprint.Line1x3, enemyPost, HexDirection.South, EnemyShipColor, initiative: 4);
         enemy.Behaviour = new GuardBehaviour(enemyPost, radius: 5);
@@ -101,7 +101,7 @@ public class Scenario
         (int Q, int R) tile, HexDirection facing, Color color, int initiative)
     {
         return new Ship(graphicsDevice, grid, name, side, footprint, tile, baseColor: color, activeColor: ActiveShipColor,
-            facing: facing, initiative: initiative, maxTurnPoints: 5, maxHp: 30,
-            weapon: new Weapon("Cannon", damage: 10, range: 6, shotCost: 3, spreadStep: 3));
+            facing: facing, initiative: initiative, maxTurnPoints: 5, maxHp: 30, viewRadius: 4,
+            weapon: new Weapon("Cannon", damage: 10, range: 10, shotCost: 3, spreadPerTile: 0.2f));
     }
 }

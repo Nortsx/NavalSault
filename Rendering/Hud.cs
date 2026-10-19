@@ -91,10 +91,15 @@ public class Hud
         float y = 80;
         foreach (var ship in _turns.Ships)
         {
+            // Enemies out of sight don't make the list.
+            if (!_turns.Vision.CanSee(Side.Player, ship))
+                continue;
+
             string weapon = ship.Weapon == null ? "" : $"  |  {ship.Weapon.Name}: range {ship.Weapon.Range}, {ship.Weapon.ShotCost} TP";
             string side = ship.Side == Side.Player ? "" : " [enemy]";
             string hp = ship.IsSunk ? "SUNK" : $"HP {ship.Hp}/{ship.MaxHp}";
-            _spriteBatch.DrawString(_font, $"{ship.Name}{side} ({ship.Footprint.Name})  {hp}{weapon}", new Vector2(10, y), Color.White);
+            _spriteBatch.DrawString(_font, $"{ship.Name}{side} ({ship.Footprint.Name})  {hp}  |  view {ship.ViewRadius}{weapon}",
+                new Vector2(10, y), Color.White);
             y += 20;
         }
         _spriteBatch.End();
@@ -107,7 +112,7 @@ public class Hud
 
         foreach (var ship in _turns.Ships)
         {
-            if (ship.IsSunk)
+            if (ship.IsSunk || !_turns.Vision.CanSee(Side.Player, ship))
                 continue;
 
             var screen = _graphicsDevice.Viewport.Project(ship.Position + HpBarOffset, camera.Projection, camera.View, Matrix.Identity);

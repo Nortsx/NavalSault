@@ -49,6 +49,9 @@ public class HexGrid
         return new Vector3(x, TileY, z);
     }
 
+    // Every tile on the map.
+    public IEnumerable<(int Q, int R)> Tiles => _tiles.Keys;
+
     public bool IsOnMap((int Q, int R) tile)
     {
         return _tiles.ContainsKey(tile);

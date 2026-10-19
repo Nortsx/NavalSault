@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using NavalSault.GameLogic;
@@ -20,6 +21,9 @@ public class BattleRenderer
     private static readonly Color ShellColor = new(255, 240, 180);
     private static readonly Color SplashColor = new(200, 230, 255);
     private static readonly Color HitColor = new(255, 50, 30);
+    // Shade over tiles none of the player's ships can see.
+    private static readonly Color FogColor = new(10, 20, 35);
+    private const float FogAlpha = 0.45f;
     // Shells leave from about deck height above the tile.
     private static readonly Vector3 MuzzleOffset = new(0f, 3f, 0f);
     // Share of the arc drawn behind the shell as a tracer.
@@ -65,8 +69,7 @@ public class BattleRenderer
     {
         _effect.View = reflectionView;
         _effect.Projection = projection;
-        foreach (var ship in _turns.Ships)
-            ship.Draw(_graphicsDevice, _effect);
+        DrawVisibleShips();
     }
 
     public void Draw(Matrix view, Matrix projection)
@@ -75,11 +78,13 @@ public class BattleRenderer
         _effect.Projection = projection;
         _grid.Draw(_graphicsDevice, _effect, _controller.HoveredTile);
         _island.Draw(_graphicsDevice, _effect, _grid);
+        _overlay.Draw(_graphicsDevice, _effect, _grid, _grid.Tiles.Where(t => !_turns.Vision.IsVisible(Side.Player, t)),
+            FogColor, FogAlpha, outline: false);
 
         foreach (var ship in _turns.Ships)
         {
-            // AI ships keep their plans to themselves until the turn resolves.
-            if (!ship.IsPlayerControlled && _turns.Phase == TurnPhase.Planning)
+            // AI ships keep their plans to themselves until the turn resolves, and ships out of sight always do.
+            if ((!ship.IsPlayerControlled && _turns.Phase == TurnPhase.Planning) || !PlayerSees(ship))
                 continue;
 
             foreach (var order in ship.PlannedOrders)
@@ -106,8 +111,21 @@ public class BattleRenderer
         if (_turns.ResolvingOrder is ShootOrder firing)
             DrawShotInFlight(firing);
 
+        DrawVisibleShips();
+    }
+
+    private bool PlayerSees(Ship ship)
+    {
+        return _turns.Vision.CanSee(Side.Player, ship);
+    }
+
+    private void DrawVisibleShips()
+    {
         foreach (var ship in _turns.Ships)
-            ship.Draw(_graphicsDevice, _effect);
+        {
+            if (PlayerSees(ship))
+                ship.Draw(_graphicsDevice, _effect);
+        }
     }
 
     private List<Vector3> ToWorldPositions(IReadOnlyList<(int Q, int R)> path)
@@ -132,18 +150,26 @@ public class BattleRenderer
         _overlay.Draw(_graphicsDevice, _effect, _grid, [shot.TargetTile], color, fillAlpha);
     }
 
-    // A tracer following the shell, then a splash column on the tile it landed on.
+    // A tracer following the shell, then a splash column on the tile it landed on. The player always sees
+    // their own shells; an enemy's only as far as it's in sight: the tracer if the shooter is, the splash if the landing tile is.
     private void DrawShotInFlight(ShootOrder shot)
     {
         var from = _grid.AxialToWorld(shot.FiringTile) + MuzzleOffset;
         var to = _grid.AxialToWorld(shot.LandingTile);
+        bool ownShot = shot.Ship.Side == Side.Player;
 
         if (!shot.HasLanded)
         {
+            if (!ownShot && !PlayerSees(shot.Ship))
+                return;
+
             float t = shot.FlightProgress;
             PathLine.Draw(_graphicsDevice, _effect, ShotArc.Points(from, to, Math.Max(0f, t - TracerLength), t, 8), ShellColor);
             return;
         }
+
+        if (!ownShot && !_turns.Vision.IsVisible(Side.Player, shot.LandingTile))
+            return;
 
         var color = shot.HitShip != null ? HitColor : SplashColor;
         _overlay.Draw(_graphicsDevice, _effect, _grid, [shot.LandingTile], color, fillAlpha: 0.6f);
