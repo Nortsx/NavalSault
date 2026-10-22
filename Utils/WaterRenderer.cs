@@ -6,7 +6,7 @@ namespace NavalSault.Utils;
 
 // Owns everything the water shader needs: the wave mesh, reflection/refraction targets and noise textures.
 // Each frame: PrepareTargets (off-screen passes) first, then Draw once the back buffer is set.
-public class WaterRenderer
+public class WaterRenderer : IDisposable
 {
     private const float WaterHeight = 0f;
     private const float WaveSpeed = 0.03f;
@@ -102,5 +102,15 @@ public class WaterRenderer
 
         _effect.CurrentTechnique = _effect.Techniques["Water"];
         _plane.Draw(_graphicsDevice, _effect);
+    }
+
+    // The water effect comes from the content manager, which unloads it.
+    public void Dispose()
+    {
+        _plane.Dispose();
+        _reflectionTarget.Dispose();
+        _refractionTarget.Dispose();
+        _distortionMap.Dispose();
+        _normalMap.Dispose();
     }
 }

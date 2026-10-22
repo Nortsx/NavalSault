@@ -9,7 +9,7 @@ using NavalSault.Utils;
 
 namespace NavalSault.GameLogic;
 
-public class Ship
+public class Ship : IDisposable
 {
     private const float MoveSpeed = 18f;
     // How long a sunk hull takes to slip under, and how deep and how far over it goes.
@@ -248,5 +248,11 @@ public class Ship
             pass.Apply();
             graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _primitiveCount);
         }
+    }
+
+    public void Dispose()
+    {
+        _vertexBuffer.Dispose();
+        _indexBuffer.Dispose();
     }
 }

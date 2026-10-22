@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace NavalSault.Utils;
 
-public class WaterPlane
+public class WaterPlane : IDisposable
 {
     private struct Wave
     {
@@ -120,5 +120,11 @@ public class WaterPlane
             pass.Apply();
             graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _primitiveCount);
         }
+    }
+
+    public void Dispose()
+    {
+        _vertexBuffer.Dispose();
+        _indexBuffer.Dispose();
     }
 }

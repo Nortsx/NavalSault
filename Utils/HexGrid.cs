@@ -5,7 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace NavalSault.Utils;
 
-public class HexGrid
+public class HexGrid : IDisposable
 {
     private const float HighlightFillAlpha = 110f / 255f;
     private const float HighlightYOffset = 0.05f;
@@ -151,5 +151,12 @@ public class HexGrid
 
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;
+    }
+
+    public void Dispose()
+    {
+        _tileMesh.Dispose();
+        _highlightTileMesh.Dispose();
+        _highlightFillMesh.Dispose();
     }
 }

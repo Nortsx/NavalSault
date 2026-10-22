@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace NavalSault.Utils;
 
-public class HexTile
+public class HexTile : IDisposable
 {
     private readonly VertexBuffer _vertexBuffer;
     private readonly IndexBuffer _indexBuffer;
@@ -47,5 +47,11 @@ public class HexTile
             pass.Apply();
             graphicsDevice.DrawIndexedPrimitives(PrimitiveType.LineList, 0, 0, _primitiveCount);
         }
+    }
+
+    public void Dispose()
+    {
+        _vertexBuffer.Dispose();
+        _indexBuffer.Dispose();
     }
 }

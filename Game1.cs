@@ -1,28 +1,26 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
-using NavalSault.GameLogic;
-using NavalSault.GameLogic.Scripting;
-using NavalSault.Input;
-using NavalSault.Rendering;
+using NavalSault.Screens;
 using NavalSault.Utils;
 
 namespace NavalSault;
 
+// Owns the window and what every screen shares, and switches between the main menu and a battle.
 public class Game1 : Game
 {
-    private static readonly Color SkyColor = new(140, 185, 225);
+    public static readonly Color SkyColor = new(140, 185, 225);
     private static readonly Vector3 LightDirection = Vector3.Normalize(new Vector3(0.4f, -1f, 0.3f));
 
     private GraphicsDeviceManager _graphics;
-    private Camera _camera;
     private WaterRenderer _water;
-    private TurnManager _turns;
-    private ScriptRunner _script;
-    private PlayerController _controller;
-    private BattleRenderer _battleRenderer;
-    private Hud _hud;
-    private int _previousScrollWheel;
+    private SpriteFont _font;
+    private KeyboardState _previousKeyboard;
+    private GamePadState _previousGamePad;
+
+    // Exactly one of these is set: the menu while choosing, the battle while playing.
+    private MenuScreen _menu;
+    private BattleScreen _battle;
 
     public Game1()
     {
@@ -35,44 +33,57 @@ public class Game1 : Game
         IsMouseVisible = true;
     }
 
-    protected override void Initialize()
-    {
-        _camera = new Camera(GraphicsDevice, Vector3.Zero);
-
-        base.Initialize();
-    }
-
     protected override void LoadContent()
     {
         _water = new WaterRenderer(GraphicsDevice, Content.Load<Effect>("Water"), SkyColor, LightDirection);
-        var scenario = Scenario.Skirmish(GraphicsDevice);
-        var grid = scenario.Grid;
-        _camera.SetPanBounds(Vector3.Zero, grid.WorldRadius);
+        _font = Content.Load<SpriteFont>("DefaultFont");
+        _menu = new MenuScreen(GraphicsDevice, _font);
+        _previousKeyboard = Keyboard.GetState();
+        _previousGamePad = GamePad.GetState(PlayerIndex.One);
+    }
 
-        _turns = new TurnManager(scenario.Ships, grid, new MovePathfinder(grid), scenario.VictoryConditions);
-        _script = new ScriptRunner(_turns, scenario.Events);
-
-        _controller = new PlayerController(GraphicsDevice, _camera, grid, _turns);
-        _battleRenderer = new BattleRenderer(GraphicsDevice, LightDirection, grid, scenario.Island, _turns, _controller);
-        _hud = new Hud(GraphicsDevice, Content.Load<SpriteFont>("DefaultFont"), _turns, _controller, _script.Context);
-        _turns.Start();
-        _previousScrollWheel = Mouse.GetState().ScrollWheelValue;
+    // The shared assets loaded into Content are released with it when the game shuts down.
+    protected override void UnloadContent()
+    {
+        _battle?.Dispose();
+        _menu?.Dispose();
+        _water.Dispose();
+        base.UnloadContent();
     }
 
     protected override void Update(GameTime gameTime)
     {
         var keyboard = Keyboard.GetState();
-
-        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || keyboard.IsKeyDown(Keys.Escape))
-            Exit();
-
+        var gamePad = GamePad.GetState(PlayerIndex.One);
         var mouse = Mouse.GetState();
-        _camera.Update(gameTime, keyboard, mouse.ScrollWheelValue - _previousScrollWheel);
-        _previousScrollWheel = mouse.ScrollWheelValue;
+        // Escape backs out one screen: from a battle to the menu, from the menu out of the game.
+        bool escapePressed = (keyboard.IsKeyDown(Keys.Escape) && _previousKeyboard.IsKeyUp(Keys.Escape))
+                             || (gamePad.Buttons.Back == ButtonState.Pressed && _previousGamePad.Buttons.Back == ButtonState.Released);
+        _previousKeyboard = keyboard;
+        _previousGamePad = gamePad;
 
-        _controller.Update(keyboard, mouse);
-        _turns.Update(gameTime);
-        _script.Update(gameTime);
+        if (_battle != null)
+        {
+            _battle.Update(gameTime, keyboard, mouse, escapePressed);
+            if (_battle.ExitRequested)
+            {
+                _battle.Dispose();
+                _battle = null;
+                _menu = new MenuScreen(GraphicsDevice, _font);
+            }
+        }
+        else
+        {
+            _menu.Update(mouse, escapePressed);
+            if (_menu.QuitRequested)
+                Exit();
+            else if (_menu.ChosenScenario is { } scenario)
+            {
+                _menu.Dispose();
+                _menu = null;
+                _battle = new BattleScreen(GraphicsDevice, Services, _font, LightDirection, scenario);
+            }
+        }
 
         base.Update(gameTime);
     }
@@ -83,14 +94,10 @@ public class Game1 : Game
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
         GraphicsDevice.RasterizerState = RasterizerState.CullNone;
 
-        float time = (float)gameTime.TotalGameTime.TotalSeconds;
-
-        _water.PrepareTargets(_camera, view => _battleRenderer.DrawReflected(view, _camera.Projection));
-
-        GraphicsDevice.Clear(SkyColor);
-        _water.Draw(_camera, time);
-        _battleRenderer.Draw(_camera.View, _camera.Projection);
-        _hud.Draw(gameTime, _camera);
+        if (_battle != null)
+            _battle.Draw(gameTime, _water);
+        else
+            _menu.Draw(gameTime, _water);
 
         base.Draw(gameTime);
     }

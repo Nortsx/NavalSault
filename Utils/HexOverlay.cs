@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -5,7 +6,7 @@ using Microsoft.Xna.Framework.Graphics;
 namespace NavalSault.Utils;
 
 // Marks any set of tiles with a see-through fill and a solid outline, e.g. the area a shell can land in.
-public class HexOverlay
+public class HexOverlay : IDisposable
 {
     private const float YOffset = 0.08f;
 
@@ -54,5 +55,11 @@ public class HexOverlay
         effect.Alpha = previousAlpha;
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;
+    }
+
+    public void Dispose()
+    {
+        _fillMesh.Dispose();
+        _outlineMesh.Dispose();
     }
 }

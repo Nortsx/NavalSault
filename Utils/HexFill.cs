@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace NavalSault.Utils;
 
-public class HexFill
+public class HexFill : IDisposable
 {
     private readonly VertexBuffer _vertexBuffer;
     private readonly IndexBuffer _indexBuffer;
@@ -49,5 +49,11 @@ public class HexFill
             pass.Apply();
             graphicsDevice.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _primitiveCount);
         }
+    }
+
+    public void Dispose()
+    {
+        _vertexBuffer.Dispose();
+        _indexBuffer.Dispose();
     }
 }

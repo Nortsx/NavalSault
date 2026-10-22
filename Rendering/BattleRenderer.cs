@@ -12,7 +12,7 @@ namespace NavalSault.Rendering;
 
 // Draws the battle in 3D: the grid, the island, the ships, their planned orders,
 // the player's previews and shells in flight.
-public class BattleRenderer
+public class BattleRenderer : IDisposable
 {
     private static readonly Color PreviewPathColor = new(255, 225, 70);
     private static readonly Color PlannedPathColor = new(255, 255, 255);
@@ -174,5 +174,11 @@ public class BattleRenderer
         var color = shot.HitShip != null ? HitColor : SplashColor;
         _overlay.Draw(_graphicsDevice, _effect, _grid, [shot.LandingTile], color, fillAlpha: 0.6f);
         PathLine.Draw(_graphicsDevice, _effect, [to, to + new Vector3(0f, SplashHeight, 0f)], color);
+    }
+
+    public void Dispose()
+    {
+        _effect.Dispose();
+        _overlay.Dispose();
     }
 }

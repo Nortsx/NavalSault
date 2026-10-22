@@ -19,7 +19,7 @@ public enum TurnPhase
     GameOver
 }
 
-public class TurnManager
+public class TurnManager : IDisposable
 {
     // Sorted by Initiative, highest first. Ships plan and resolve in this order.
     private readonly List<Ship> _ships;
@@ -319,5 +319,14 @@ public class TurnManager
         }
 
         return occupied;
+    }
+
+    // Every ship in the battle belongs to the turn manager, including ones still waiting to join.
+    public void Dispose()
+    {
+        foreach (var ship in _ships)
+            ship.Dispose();
+        foreach (var ship in _pendingShips)
+            ship.Dispose();
     }
 }

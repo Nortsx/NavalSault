@@ -10,7 +10,7 @@ using NavalSault.Utils;
 namespace NavalSault.Rendering;
 
 // Screen-space overlay: FPS, turn status, controls help, the ship list, HP bars over ships and the action buttons.
-public class Hud
+public class Hud : IDisposable
 {
     private static readonly Color PlayerHpColor = new(90, 220, 110);
     private static readonly Color EnemyHpColor = new(230, 60, 50);
@@ -70,7 +70,7 @@ public class Hud
         DrawHpBars(camera);
         _spriteBatch.DrawString(_font, $"FPS: {_fps:0}", new Vector2(10, 10), Color.White);
         _spriteBatch.DrawString(_font, status, new Vector2(10, 30), Color.White);
-        _spriteBatch.DrawString(_font, "M: move   F: shoot   Q/E: end facing   Right click: back to move   Wheel: zoom   Backspace: undo   Enter: finish ship",
+        _spriteBatch.DrawString(_font, "M: move   F: shoot   Q/E: end facing   Right click: back to move   Wheel: zoom   Backspace: undo   Enter: finish ship   Esc: menu",
             new Vector2(10, 50), Color.White);
 
         if (_script.Message is { } message)
@@ -126,5 +126,11 @@ public class Hud
             _spriteBatch.Draw(_pixel, new Rectangle(left + border, top + border, filled, height - 2 * border),
                 ship.Side == Side.Player ? PlayerHpColor : EnemyHpColor);
         }
+    }
+
+    public void Dispose()
+    {
+        _spriteBatch.Dispose();
+        _pixel.Dispose();
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -6,7 +7,7 @@ using NavalSault.Utils;
 namespace NavalSault.GameLogic;
 
 // A group of tiles ships can't enter, drawn as solid hexes.
-public class Island
+public class Island : IDisposable
 {
     private const float YOffset = 0.05f;
 
@@ -36,5 +37,10 @@ public class Island
 
         effect.LightingEnabled = true;
         effect.VertexColorEnabled = false;
+    }
+
+    public void Dispose()
+    {
+        _fillMesh.Dispose();
     }
 }
