@@ -46,6 +46,8 @@ public class Ship : IDisposable
     // Bow direction; turns to each leg's direction as the ship moves along a path.
     public HexDirection Facing { get; private set; }
     public bool IsMoving { get; private set; }
+    // Hull colour while not taking orders; the HUD paints the ship's icon with it.
+    public Color BaseColor => _baseColor;
     // Set by the turn manager while this ship is the one taking orders.
     public bool IsActive { get; set; }
 

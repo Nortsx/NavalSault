@@ -9,7 +9,7 @@ using NavalSault.Utils;
 
 namespace NavalSault.Rendering;
 
-// Screen-space overlay: FPS, turn status, controls help, the ship list, HP bars over ships and the action buttons.
+// Screen-space overlay: FPS, turn status, controls help, HP bars over ships, the initiative bar and the action buttons.
 public class Hud : IDisposable
 {
     private static readonly Color PlayerHpColor = new(90, 220, 110);
@@ -25,6 +25,7 @@ public class Hud : IDisposable
     private readonly TurnManager _turns;
     private readonly PlayerController _controller;
     private readonly ScriptContext _script;
+    private readonly InitiativeBar _initiativeBar;
 
     private int _frameCount;
     private double _fpsTimer;
@@ -40,6 +41,7 @@ public class Hud : IDisposable
         _script = script;
         _pixel = new Texture2D(graphicsDevice, 1, 1);
         _pixel.SetData([Color.White]);
+        _initiativeBar = new InitiativeBar(graphicsDevice, font, _pixel, turns);
     }
 
     public void Draw(GameTime gameTime, Camera camera)
@@ -81,26 +83,14 @@ public class Hud : IDisposable
             _spriteBatch.DrawString(_font, message, position, Color.White);
         }
 
+        if (_turns.Phase != TurnPhase.GameOver)
+            _initiativeBar.Draw(_spriteBatch);
+
         if (_controller.ButtonsVisible)
         {
             var mousePosition = Mouse.GetState().Position;
             foreach (var button in _controller.Buttons)
                 button.Draw(_spriteBatch, _pixel, _font, mousePosition);
-        }
-
-        float y = 80;
-        foreach (var ship in _turns.Ships)
-        {
-            // Enemies out of sight don't make the list.
-            if (!_turns.Vision.CanSee(Side.Player, ship))
-                continue;
-
-            string weapon = ship.Weapon == null ? "" : $"  |  {ship.Weapon.Name}: range {ship.Weapon.Range}, {ship.Weapon.ShotCost} TP";
-            string side = ship.Side == Side.Player ? "" : " [enemy]";
-            string hp = ship.IsSunk ? "SUNK" : $"HP {ship.Hp}/{ship.MaxHp}";
-            _spriteBatch.DrawString(_font, $"{ship.Name}{side} ({ship.Footprint.Name})  {hp}  |  view {ship.ViewRadius}{weapon}",
-                new Vector2(10, y), Color.White);
-            y += 20;
         }
         _spriteBatch.End();
     }
@@ -130,6 +120,7 @@ public class Hud : IDisposable
 
     public void Dispose()
     {
+        _initiativeBar.Dispose();
         _spriteBatch.Dispose();
         _pixel.Dispose();
     }
