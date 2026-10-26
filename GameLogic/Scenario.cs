@@ -6,6 +6,7 @@ using Microsoft.Xna.Framework.Graphics;
 using NavalSault.GameLogic.AI;
 using NavalSault.GameLogic.Rules;
 using NavalSault.GameLogic.Scripting;
+using NavalSault.Rendering;
 using NavalSault.Utils;
 
 namespace NavalSault.GameLogic;
@@ -25,6 +26,8 @@ public class Scenario : IDisposable
     private static readonly Color GridHighlightColor = new(150, 255, 190);
     private const float HexRadius = 8f;
     private const float GridTileY = 1.3f;
+    // The hull takes the ship's colour; the superstructure and guns keep their steel.
+    private static readonly ShipModel GunboatModel = new("Models/Gunboat", TintedMeshes: new HashSet<string> { "Hull" });
 
     public HexGrid Grid { get; }
     public Island Island { get; }
@@ -73,13 +76,13 @@ public class Scenario : IDisposable
 
         // The enemy waits behind the island, bow towards it, just out of Ship A's sight but well within its guns' range.
         var enemyPost = (0, -7);
-        var enemy = CreateShip(graphicsDevice, grid, "Enemy", Side.Enemy, HexFootprint.Line1x3, enemyPost, HexDirection.South, EnemyShipColor, initiative: 4);
+        var enemy = CreateShip(graphicsDevice, content, grid, "Enemy", Side.Enemy, HexFootprint.Line1x3, enemyPost, HexDirection.South, EnemyShipColor, initiative: 4);
         enemy.Behaviour = new GuardBehaviour(enemyPost, radius: 5);
 
         var ships = new[]
         {
-            CreateShip(graphicsDevice, grid, "Ship A", Side.Player, HexFootprint.Line1x3, (0, 0), HexDirection.North, new Color(200, 60, 40), initiative: 5),
-            CreateShip(graphicsDevice, grid, "Ship B", Side.Player, HexFootprint.Wide2x3, (3, -1), HexDirection.North, new Color(60, 90, 200), initiative: 3),
+            CreateShip(graphicsDevice, content, grid, "Ship A", Side.Player, HexFootprint.Line1x3, (0, 0), HexDirection.North, new Color(200, 60, 40), initiative: 5),
+            CreateShip(graphicsDevice, content, grid, "Ship B", Side.Player, HexFootprint.Wide2x3, (3, -1), HexDirection.North, new Color(60, 90, 200), initiative: 3),
             enemy
         };
 
@@ -101,7 +104,7 @@ public class Scenario : IDisposable
             ScriptedEvent.OnShipSunk(Side.Player, Enrage),
             ScriptedEvent.OnTurn(5, script =>
             {
-                var reinforcement = CreateShip(graphicsDevice, grid, "Enemy 2", Side.Enemy, HexFootprint.Line1x3, (-6, -1), HexDirection.South,
+                var reinforcement = CreateShip(graphicsDevice, content, grid, "Enemy 2", Side.Enemy, HexFootprint.Line1x3, (-6, -1), HexDirection.South,
                     EnemyShipColor, initiative: 2);
                 reinforcement.Behaviour = new AggressiveBehaviour();
                 script.Spawn(reinforcement);
@@ -123,14 +126,14 @@ public class Scenario : IDisposable
         foreach (var tile in island.Tiles)
             grid.SetBlocked(tile, true);
 
-        var north = CreateShip(graphicsDevice, grid, "Hunter N", Side.Enemy, HexFootprint.Line1x3, (2, -10), HexDirection.South, EnemyShipColor, initiative: 4);
+        var north = CreateShip(graphicsDevice, content, grid, "Hunter N", Side.Enemy, HexFootprint.Line1x3, (2, -10), HexDirection.South, EnemyShipColor, initiative: 4);
         north.Behaviour = new AggressiveBehaviour();
-        var south = CreateShip(graphicsDevice, grid, "Hunter S", Side.Enemy, HexFootprint.Line1x3, (-2, 10), HexDirection.North, EnemyShipColor, initiative: 2);
+        var south = CreateShip(graphicsDevice, content, grid, "Hunter S", Side.Enemy, HexFootprint.Line1x3, (-2, 10), HexDirection.North, EnemyShipColor, initiative: 2);
         south.Behaviour = new AggressiveBehaviour();
 
         var ships = new[]
         {
-            CreateShip(graphicsDevice, grid, "Bastion", Side.Player, HexFootprint.Wide2x3, (0, 0), HexDirection.North, new Color(60, 90, 200), initiative: 3),
+            CreateShip(graphicsDevice, content, grid, "Bastion", Side.Player, HexFootprint.Wide2x3, (0, 0), HexDirection.North, new Color(60, 90, 200), initiative: 3),
             north,
             south
         };
@@ -149,10 +152,17 @@ public class Scenario : IDisposable
         return new HexGrid(graphicsDevice, HexRadius, gridRadius, GridTileY, GridColor, GridHighlightColor);
     }
 
-    private static Ship CreateShip(GraphicsDevice graphicsDevice, HexGrid grid, string name, Side side, HexFootprint footprint,
-        (int Q, int R) tile, HexDirection facing, Color color, int initiative)
+    // 1x3 ships are gunboats; 2x3 ships have no model yet and are drawn as boxes.
+    private static ShipModel ModelFor(HexFootprint footprint)
     {
-        return new Ship(graphicsDevice, grid, name, side, footprint, tile, baseColor: color, activeColor: ActiveShipColor,
+        return footprint == HexFootprint.Line1x3 ? GunboatModel : null;
+    }
+
+    private static Ship CreateShip(GraphicsDevice graphicsDevice, ContentManager content, HexGrid grid, string name, Side side,
+        HexFootprint footprint, (int Q, int R) tile, HexDirection facing, Color color, int initiative)
+    {
+        var hull = ShipHull.Create(graphicsDevice, content, grid, footprint, ModelFor(footprint));
+        return new Ship(hull, grid, name, side, footprint, tile, baseColor: color, activeColor: ActiveShipColor,
             facing: facing, initiative: initiative, maxTurnPoints: 5, maxHp: 30, viewRadius: 4,
             weapon: new Weapon("Cannon", damage: 10, range: 10, shotCost: 3, spreadPerTile: 0.2f));
     }

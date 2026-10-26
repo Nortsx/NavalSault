@@ -1,0 +1,7 @@
+# Paint is white so the game's per-ship colour shows through as-is.
+newmtl Paint
+Kd 1 1 1
+newmtl Steel
+Kd 0.75 0.75 0.72
+newmtl Dark
+Kd 0.22 0.22 0.24
